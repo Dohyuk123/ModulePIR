@@ -82,6 +82,7 @@ pub fn raw_generate_expansion_params<'a>(
 ) -> Vec<PolyMatrixNTT<'a>> {
     let g_exp = build_gadget(params, 1, m_exp);
     debug!("using gadget base {}", g_exp.get_poly(0, 1)[0]);
+    println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
     let g_exp_ntt = g_exp.ntt();
     let mut res = Vec::new();
 
@@ -202,6 +203,7 @@ impl<'a> YClient<'a> {
         let mut out = Vec::new();
 
         let scale_k = self.params.modulus / self.params.pt_modulus;
+	println!("encrypt modulus: {}, polylen: {}, scale_k: {}", self.params.modulus, self.params.poly_len, scale_k);
 
         for i in 0..(1 << dim_log2) {
             let mut scalar = PolyMatrixRaw::zero(self.params, 1, 1);
@@ -212,6 +214,7 @@ impl<'a> YClient<'a> {
             }
 
             if packing {
+		println!("packing: {}", true);
                 let factor =
                     invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
                 scalar = scalar_multiply_alloc(
@@ -227,6 +230,7 @@ impl<'a> YClient<'a> {
             // }
 
             let ct = if multiply_ct {
+		println!("multiply_ct: {}", true);
                 let factor =
                     invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
 
@@ -301,6 +305,7 @@ impl<'a> YClient<'a> {
         index_row: usize,
     ) -> Vec<u64> {
         if public_seed_idx == SEED_0 && !packing {
+	    println!("packing");
             let lwe_params = LWEParams::default();
             let dim = 1 << (dim_log2 + self.params.poly_len_log2);
 
@@ -330,10 +335,199 @@ impl<'a> YClient<'a> {
 
             lwes
         } else {
+	    println!("else");
             let out = self.generate_query_impl(public_seed_idx, dim_log2, packing, index_row);
             let lwes = self.rlwes_to_lwes(&out);
             lwes
         }
+    }
+
+    pub fn decode_response(&self, response: &[u64]) -> Vec<u64> {
+        debug!("Decoding response: {:?}", &response[..16]);
+        let db_cols = 1 << (self.params.db_dim_2 + self.params.poly_len_log2);
+
+        let sk = self.inner.get_sk_reg().as_slice().to_vec();
+
+        let mut out = Vec::new();
+        for col in 0..db_cols {
+            let mut sum = 0u128;
+            for i in 0..self.params.poly_len {
+                let v1 = response[i * db_cols + col];
+                let v2 = sk[i];
+                sum += v1 as u128 * v2 as u128;
+            }
+
+            sum += response[self.params.poly_len * db_cols + col] as u128;
+
+            let result = (sum % self.params.modulus as u128) as u64;
+            let result_rescaled = rescale(result, self.params.modulus, self.params.pt_modulus);
+            out.push(result_rescaled);
+        }
+
+        out
+    }
+
+    pub fn client(&self) -> &Client<'a> {
+        self.inner
+    }
+}
+
+
+
+pub struct NewClient<'a> {
+    inner: &'a mut Client<'a>,
+    params: &'a Params,
+    lwe_client: LWEClient,
+    pt_byte : usize,
+}
+
+
+impl<'a> NewClient<'a> {
+    pub fn new(inner: &'a mut Client<'a>, params: &'a Params, pt_byte : usize) -> Self {
+        Self {
+            inner,
+            params,
+            lwe_client: LWEClient::new(LWEParams::default()),
+	    pt_byte,
+        }
+    }
+
+    pub fn lwe_client(&self) -> &LWEClient {
+        &self.lwe_client
+    }
+
+    fn rlwes_to_lwes(&self, ct: &[PolyMatrixRaw<'a>]) -> Vec<u64> {
+        let v = ct
+            .iter()
+            .map(|ct| rlwe_to_lwe(self.params, ct))
+            .collect::<Vec<_>>();
+        concat_horizontal(&v, self.params.poly_len + 1, self.params.poly_len)
+    }
+
+    pub fn generate_query_impl(
+        &self,
+        public_seed_idx: u8,
+        dim_log2: usize,
+        packing: bool,
+        index: usize,
+	//pt_byte : usize
+    ) -> Vec<PolyMatrixRaw<'a>> {
+        // let db_cols = 1 << (self.params.db_dim_2 + self.params.poly_len_log2);
+        // let idx_dim1 = index / db_cols;
+
+        let multiply_ct = true;
+
+        let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx));
+
+        // Generate dim1_bits LWE samples under public randomness
+        let mut out = Vec::new();
+
+        let scale_k = self.params.modulus / self.params.pt_modulus;
+	//println!("encrypt modulus: {}, polylen: {}, scale_k: {}", self.params.modulus, self.params.poly_len, scale_k);
+
+        for i in 0..(1 << dim_log2) {
+            let mut scalar = PolyMatrixRaw::zero(self.params, 1, 1);
+            let is_nonzero = i == (index / self.params.poly_len);
+
+            if is_nonzero {
+                scalar.data[index % self.params.poly_len] = scale_k;
+            }
+
+            if packing {
+		//println!("packing: {}", true);
+                let factor =
+                    invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
+                scalar = scalar_multiply_alloc(
+                    &PolyMatrixRaw::single_value(self.params, factor).ntt(),
+                    &scalar.ntt(),
+                )
+                .raw();
+            }
+
+            // if public_seed_idx == SEED_0 {
+            //     out.push(scalar.pad_top(1));
+            //     continue;
+            // }
+
+            let ct = if multiply_ct {
+		println!("multiply_ct: {}", true);
+                let factor =
+                    invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
+
+                self.inner.encrypt_matrix_scaled_reg(
+                    &scalar.ntt(),
+                    &mut ChaCha20Rng::from_entropy(),
+                    &mut rng_pub,
+                    factor,
+                )
+            } else {
+                self.inner.encrypt_matrix_reg(
+                    &scalar.ntt(),
+                    &mut ChaCha20Rng::from_entropy(),
+                    &mut rng_pub,
+                )
+            };
+
+            // let mut ct = self.inner.encrypt_matrix_reg(
+            //     &scalar.ntt(),
+            //     &mut ChaCha20Rng::from_entropy(),
+            //     &mut rng_pub,
+            // );
+
+            // if multiply_ct && packing {
+            //     let factor =
+            //         invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
+            //     ct = scalar_multiply_alloc(
+            //         &PolyMatrixRaw::single_value(self.params, factor).ntt(),
+            //         &ct,
+            //     );
+            // };
+
+            // if multiply_error && is_nonzero && packing {
+            //     let factor =
+            //         invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
+            //     ct = scalar_multiply_alloc(
+            //         &PolyMatrixRaw::single_value(self.params, factor).ntt(),
+            //         &ct,
+            //     );
+            // }
+
+            let ct_raw = ct.raw();
+            // let ct_0_nega = negacyclic_perm(ct_raw.get_poly(0, 0), 0, self.params.modulus);
+            // let ct_1_nega = negacyclic_perm(ct_raw.get_poly(1, 0), 0, self.params.modulus);
+            // let mut ct_nega = PolyMatrixRaw::zero(self.params, 2, 1);
+            // ct_nega.get_poly_mut(0, 0).copy_from_slice(&ct_0_nega);
+            // ct_nega.get_poly_mut(1, 0).copy_from_slice(&ct_1_nega);
+
+            // self-test
+            // {
+            //     let test_ct = self.inner.encrypt_matrix_reg(
+            //         &PolyMatrixRaw::single_value(self.params, scale_k * 7).ntt(),
+            //         &mut ChaCha20Rng::from_entropy(),
+            //         &mut ChaCha20Rng::from_entropy(),
+            //     );
+            //     let lwe = rlwe_to_lwe(self.params, &test_ct.raw());
+            //     let result = self.decode_response(&lwe);
+            //     assert_eq!(result[0], 7);
+            // }
+
+            out.push(ct_raw);
+        }
+
+        out
+    }
+
+    pub fn generate_query(
+        &self,
+        public_seed_idx: u8,
+        dim_log2: usize,
+        packing: bool,
+        index_row: usize,
+    ) -> Vec<PolyMatrixRaw<'a>> {
+        let out = self.generate_query_impl(public_seed_idx, dim_log2, packing, index_row);
+	out        
+	//let lwes = self.rlwes_to_lwes(&out);
+        //lwes
     }
 
     pub fn decode_response(&self, response: &[u64]) -> Vec<u64> {

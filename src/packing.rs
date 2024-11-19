@@ -308,6 +308,7 @@ pub fn precompute_pack<'a>(
     let mut res = Vec::new();
 
     for cur_ell in 1..=ell {
+	//println!("hi");
         let num_in = 1 << (ell - cur_ell + 1);
         let num_out = num_in >> 1;
 
@@ -319,6 +320,7 @@ pub fn precompute_pack<'a>(
             let ct_odd = &second_half[i];
 
             let (y, neg_y) = (&y_constants.0[cur_ell - 1], &y_constants.1[cur_ell - 1]);
+	    //println!("{:}", y_constants.0[cur_ell-1].get_poly(0, 0));
 
             scalar_multiply_avx(&mut y_times_ct_odd, &y, &ct_odd);
             scalar_multiply_avx(&mut neg_y_times_ct_odd, &neg_y, &ct_odd);
@@ -332,6 +334,7 @@ pub fn precompute_pack<'a>(
                 let ct: &PolyMatrixNTT<'_> = &ct_sum_1;
                 let t = (1 << cur_ell) + 1;
                 let t_exp = params.t_exp_left;
+		//println!("t_exp: {}", t_exp);
                 let (cur_ginv_ct_ntt, cur_ct_auto_1_ntt) = {
                     let now = Instant::now();
                     // let ct_raw = ct.raw();
@@ -339,6 +342,8 @@ pub fn precompute_pack<'a>(
                     // nb: scratch has 2nd row of ct in uncrtd form,
                     //     ct_raw has only first row
                     from_ntt_scratch(&mut ct_raw, scratch_mut_slc, ct);
+		    //println!("INTT poly len: {}", ct_raw.get_poly(0, 0).len());
+		    //println!("ntt poly len : {}", ct.get_poly(0, 0).len());
                     if cur_ell == 1 {
                         num_ntts += 2;
                     }
@@ -895,6 +900,7 @@ pub fn prep_pack_many_lwes<'a>(
     num_rlwe_outputs: usize,
 ) -> Vec<Vec<PolyMatrixNTT<'a>>> {
     let lwe_cts_size = (params.poly_len + 1) * (num_rlwe_outputs * params.poly_len);
+    println!("poly_len: {}, num_rlwe_outputs: {}", params.poly_len, num_rlwe_outputs);
     assert_eq!(lwe_cts.len(), lwe_cts_size);
 
     let mut vecs = Vec::new();

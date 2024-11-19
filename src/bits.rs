@@ -11,6 +11,7 @@ pub fn as_bytes_mut(a_m: &mut AlignedMemory64) -> &mut [u8] {
 pub fn write_bits(data: &mut [u8], mut val: u64, bit_offs: usize, mut num_bits: usize) {
     let mut byte_index = bit_offs / 8;
     let mut bit_index = bit_offs % 8;
+    //println!("num_bits: {}", num_bits);
 
     while num_bits > 0 && byte_index < data.len() {
         // Calculate how many bits can be written in the current byte.

@@ -35,10 +35,10 @@ fn main() {
         num_items,
         item_size_bits,
         num_clients,
-        trials,
+        trials, // 5
         out_report_json,
         verbose,
-        is_simplepir,
+        is_simplepir, // false
     } = args;
 
     if verbose {
@@ -59,6 +59,7 @@ fn main() {
         panic!("Items can be at must be at most 8 bits.");
     }
 
+    //println!("is_simplePIR: {}", is_simplepir); // false
     if is_simplepir {
         assert_eq!(num_clients, 1, "SimplePIR variant only supports 1 client.");
     }

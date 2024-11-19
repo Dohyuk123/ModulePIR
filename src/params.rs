@@ -10,6 +10,7 @@ const DEF_MOD_STR: &str = "[\"268369921\", \"249561089\"]";
 
 fn ext_params_from_json(json_str: &str) -> Params {
     let v: Value = serde_json::from_str(json_str).unwrap();
+    //println!("json: {}", json_str);
 
     let n = v["n"].as_u64().unwrap() as usize;
     let db_dim_1 = v["nu_1"].as_u64().unwrap() as usize;
@@ -32,6 +33,7 @@ fn ext_params_from_json(json_str: &str) -> Params {
     let version = v["version"].as_u64().unwrap_or(0) as usize;
 
     let poly_len = v["poly_len"].as_u64().unwrap_or(2048) as usize;
+    //println!("poly length : {}", poly_len);
     let moduli = v["moduli"]
         .as_array()
         .map(|x| {
