@@ -6,7 +6,9 @@ use spiral_rs::aligned_memory::AlignedMemory64;
 use spiral_rs::{
     arith::*, client::*, discrete_gaussian::*, gadget::*, number_theory::*, params::*, poly::*,
 };
+//use crate::server::Precomp;
 
+//use super::util::*;
 use super::convolution::negacyclic_matrix_u32;
 use super::{lwe::*, noise_analysis::measure_noise_width_squared, scheme::*, util::*};
 
@@ -563,6 +565,9 @@ impl<'a> NewClient<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{
+	params::params_for_scenario
+    };
 
     #[test]
     fn test_lwe() {
@@ -573,6 +578,109 @@ mod test {
         let ct = client.encrypt(&mut ChaCha20Rng::from_entropy(), scaled_pt);
         let pt_dec = client.decrypt(&ct);
         let result = rescale(pt_dec as u64, lwe_params.modulus, lwe_params.pt_modulus) as u32;
-        assert_eq!(result, pt);
+	println!("1");        
+	assert_eq!(result, pt);
+    }
+    #[test]
+    fn test_rlwe() { // encryption, decryption
+	let params = params_for_scenario(1 << 30, 1);
+	let mut client = Client::init(&params);
+	client.generate_secret_keys();
+	let y_client = YClient::new(&mut client, &params);
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+	let scale_k = params.modulus / params.pt_modulus;
+	
+	let mut plaintext_1 = PolyMatrixRaw::zero(&params, 1, 1); // how to assign
+	let mut plaintext_2 = PolyMatrixRaw::zero(&params, 1, 1);
+	
+	plaintext_1.data[0] = 63 * scale_k; // scale up plaintext
+	plaintext_1.data[1] = 84 * scale_k;
+	
+	plaintext_2.data[0] = 41;
+	plaintext_2.data[1] = 52;
+	
+	let nega = negacyclic_perm(plaintext_2.get_poly(0, 0), 0, params.modulus);
+	let mut plaintext_2_ntt = plaintext_2.ntt();
+	let mut p = 3;
+	println!("1: {}", params.modulus);
+	println!("printpoly: {:?}", nega);
+	println!("printlen: {}", plaintext_1.as_slice().len());
+	println!("{:?}", plaintext_2.as_slice()); // how to print
+	//assert_eq!(plaintext_1.as_slice(), plaintext_2.as_slice());
+	
+	let mut ct = y_client.inner.encrypt_matrix_reg(&plaintext_1.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub).raw(); //->polymatNTT(2, 1) ->encryption and how to "NTT"
+	// if i want to encrypt scaled, then "encrypt_matrix_scaled_reg"
+	//to_ntt(polyNTT, polyRaw) -> ntt all the elements of matPolyRaw
+
+	//let mut dec = y_client.inner.decrypt_matrix_reg(&ct.ntt()).raw();
+	let mut dec = decrypt_ct_reg_measured(y_client.client(), &params, &ct.ntt(), params.poly_len);	
+	println!("dec: {:?}", dec.as_slice());
+
+	let mut prod = PolyMatrixNTT::zero(&params, 2, 1);
+
+	multiply(&mut prod, &ct.ntt(), &plaintext_2_ntt);
+
+	let result = decrypt_ct_reg_measured(y_client.client(), &params, &prod, params.poly_len);
+	println!("result: {:?}", result.as_slice());
+	
+	
+	
+	
+    }
+    #[test]
+    fn test_poly() { // multiply : matrix multiplication
+	let params = params_for_scenario(1<<30, 1);
+	let mut client = Client::init(&params);
+	let mut poly_1 = PolyMatrixRaw::zero(&params, 1, 2);
+	poly_1.data[0] = 2;
+	poly_1.data[1] = 1;
+	poly_1.data[2048] = 1;
+	poly_1.data[2049] = 2;
+	let mut poly_2 = PolyMatrixRaw::zero(&params, 2, 2);
+	poly_2.data[0] = 3;
+	poly_2.data[1] = 4;
+	poly_2.data[2048] = 4;
+	poly_2.data[2049] = 3;
+	poly_2.data[4096] = 5;
+	poly_2.data[4097] = 6;
+	poly_2.data[6144] = 6;
+	poly_2.data[6145] = 5;
+	let mut poly_1_ntt = poly_1.ntt();
+	let mut poly_2_ntt = poly_2.ntt();
+	let mut res_poly_ntt = PolyMatrixNTT::zero(&params, 1, 2);
+	//println!("{:?}", res	
+	multiply(&mut res_poly_ntt, &poly_1_ntt, &poly_2_ntt);	 // 2 by 1  *  1 by 1
+	//multiply_poly(&params, res_poly_ntt.get_poly_mut(0, 0), poly_1_ntt.get_poly(0, 0), poly_2_ntt.get_poly(0, 0));
+	
+	println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 0)[0], res_poly_ntt.raw().get_poly(0, 0)[1], res_poly_ntt.raw().get_poly(0, 0)[2]); // how to print
+	println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 1)[0], res_poly_ntt.raw().get_poly(0, 1)[1], res_poly_ntt.raw().get_poly(0, 1)[2]); // how to print
+
+	
+	//assert_eq!(poly_1_ntt.get_poly(1, 0), poly_2_ntt.get_poly(0, 1));
+	
+    }
+    
+    #[test]
+    fn test_array_to_matrix(){
+	let params = params_for_scenario(1<<30, 1);
+	let mut poly_1 = PolyMatrixRaw::zero(&params, 1, 1);
+	let mut poly_2 = PolyMatrixRaw::zero(&params, 1, 1);
+	poly_1.data[0] = 3;
+	poly_1.data[1] = 4;
+	poly_2.data[0] = 5;
+	poly_2.data[1] = 6;
+
+	let mut copied_poly = PolyMatrixRaw::zero(&params, 2, 1);
+	
+	let mut combined = vec![0u64; params.poly_len * 2];
+	combined[0..params.poly_len].copy_from_slice(poly_1.get_poly(0, 0));
+	combined[params.poly_len..2*params.poly_len].copy_from_slice(poly_2.get_poly(0, 0));
+	println!("{:?}", combined);
+	
+	copied_poly.as_mut_slice().copy_from_slice(&combined);
+	println!("{:?}", copied_poly.as_slice());
+	println!("{:?}", copied_poly.get_poly(1, 0));
+	
+	
     }
 }

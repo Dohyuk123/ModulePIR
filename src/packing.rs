@@ -1204,7 +1204,7 @@ mod test {
     use spiral_rs::{client::Client, number_theory::invert_uint_mod, util::get_test_params};
 
     use crate::{
-        client::raw_generate_expansion_params, params::params_for_scenario,
+        client::*, params::params_for_scenario,
         server::generate_y_constants,
     };
 
@@ -1498,5 +1498,21 @@ mod test {
                 t
             );
         }
+    }
+    
+    fn test_query_expansion(){
+	let params = params_for_scenario(1<<30, 1);
+	let mut client = Client::init(&params);
+	client.generate_secret_keys();
+	let y_client = YClient::new(&mut client, &params);	
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+	let scale_k = params.modulus / params.pt_modulus;
+	let pt_byte_len = 4;
+	let pt_byte = 1<<4;
+	let query_index = 3
+	
+	plaintext = PolyMatrixRaw::zero(&params, 1, 1);
+
+	let factor = invert_uint_mod(params.poly_len as u64, params.modulus).unwrap
     }
 }

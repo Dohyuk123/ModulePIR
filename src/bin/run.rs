@@ -75,6 +75,17 @@ fn main() {
 
     let measurement =
         run_ypir_batched(num_items, item_size_bits, num_clients, is_simplepir, trials);
+/////////////////////////////////////////////////
+    //let params = params_for_scenario(1<<30, 1);
+    //let mut client = Client::init(&params);
+    //client.generate_secret_keys();
+    //let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+	
+    //let mut plaintext_1 = PolyMatrixRaw::zero(params, 1, 1);
+    //let mut plaintext_2 = PolyMatrixRaw::zero(params, 1, 1);
+    //plaintext_2.as_slice()[0] = 1;
+    //println!("{:?}", plaintext_1.as_slice());
+/////////////////////////////////////////////////
     println!(
         "Measurement completed. See the README for details on what the following fields mean."
     );
