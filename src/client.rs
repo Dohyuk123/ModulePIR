@@ -567,6 +567,7 @@ mod test {
     use super::*;
     use crate::{
 	params::params_for_scenario
+	//packing::*
     };
 
     #[test]
@@ -586,7 +587,7 @@ mod test {
 	let params = params_for_scenario(1 << 30, 1);
 	let mut client = Client::init(&params);
 	client.generate_secret_keys();
-	let y_client = YClient::new(&mut client, &params);
+	//let y_client = YClient::new(&mut client, &params);
 	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
 	let scale_k = params.modulus / params.pt_modulus;
 	
@@ -600,28 +601,55 @@ mod test {
 	plaintext_2.data[1] = 52;
 	
 	let nega = negacyclic_perm(plaintext_2.get_poly(0, 0), 0, params.modulus);
+	for i in 0..params.poly_len {
+	    plaintext_2.data[i] = nega[i];
+	}	
 	let mut plaintext_2_ntt = plaintext_2.ntt();
 	let mut p = 3;
 	println!("1: {}", params.modulus);
-	println!("printpoly: {:?}", nega);
+	//println!("printpoly: {:?}", nega);
 	println!("printlen: {}", plaintext_1.as_slice().len());
 	println!("{:?}", plaintext_2.as_slice()); // how to print
 	//assert_eq!(plaintext_1.as_slice(), plaintext_2.as_slice());
 	
-	let mut ct = y_client.inner.encrypt_matrix_reg(&plaintext_1.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub).raw(); //->polymatNTT(2, 1) ->encryption and how to "NTT"
+	//let mut ct = y_client.inner.encrypt_matrix_reg(&plaintext_1.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub).raw(); //->polymatNTT(2, 1) ->encryption and how to "NTT"
 	// if i want to encrypt scaled, then "encrypt_matrix_scaled_reg"
 	//to_ntt(polyNTT, polyRaw) -> ntt all the elements of matPolyRaw
+	let mut ct = client.encrypt_matrix_reg(&plaintext_1.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub).raw();
+	let nega_1 = negacyclic_perm(ct.get_poly(0, 0), 0, params.modulus);
+	let nega_2 = negacyclic_perm(ct.get_poly(1, 0), 0, params.modulus);
 
+	//for i in 0..params.poly_len{
+	//    ct.data[i] = nega_1[i];
+	//}
+	//for i in 0..params.poly_len{
+	//    ct.data[i + params.poly_len] = nega_2[i];
+	//}
 	//let mut dec = y_client.inner.decrypt_matrix_reg(&ct.ntt()).raw();
-	let mut dec = decrypt_ct_reg_measured(y_client.client(), &params, &ct.ntt(), params.poly_len);	
-	println!("dec: {:?}", dec.as_slice());
+
+	//let mut dec = decrypt_ct_reg_measured(y_client.client(), &params, &ct.ntt(), params.poly_len);	
+	let dec_result = client.decrypt_matrix_reg(&ct.ntt()).raw();
+	let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result.rows, dec_result.cols);
+	for z in 0..dec_rescaled.data.len() {
+	    dec_rescaled.data[z] = rescale(dec_result.data[z], params.modulus, params.pt_modulus);
+	}	
+	println!("dec_nega: {:?}", dec_rescaled.as_slice());
 
 	let mut prod = PolyMatrixNTT::zero(&params, 2, 1);
 
-	multiply(&mut prod, &ct.ntt(), &plaintext_2_ntt);
+	//multiply(&mut prod, &ct.ntt(), &plaintext_2_ntt);
+	//scalar_multiply_alloc(&mut prod, &plaintext_2_ntt , &ct.ntt());
+	scalar_multiply_avx(&mut prod, &plaintext_2_ntt, &ct.ntt());
 
-	let result = decrypt_ct_reg_measured(y_client.client(), &params, &prod, params.poly_len);
-	println!("result: {:?}", result.as_slice());
+	let dec_result = client.decrypt_matrix_reg(&prod).raw();
+	let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result.rows, dec_result.cols);
+	for z in 0..dec_rescaled.data.len() {
+	    dec_rescaled.data[z] = rescale(dec_result.data[z], params.modulus, params.pt_modulus);
+	}	
+	println!("dec: {:?}", dec_rescaled.as_slice());
+
+	//let result = decrypt_ct_reg_measured(y_client.client(), &params, &prod, params.poly_len);
+	//println!("result: {:?}", result.as_slice());
 	
 	
 	
@@ -631,29 +659,34 @@ mod test {
     fn test_poly() { // multiply : matrix multiplication
 	let params = params_for_scenario(1<<30, 1);
 	let mut client = Client::init(&params);
-	let mut poly_1 = PolyMatrixRaw::zero(&params, 1, 2);
-	poly_1.data[0] = 2;
+	let mut poly_1 = PolyMatrixRaw::zero(&params, 1, 1);
+	poly_1.data[0] = 6;
 	poly_1.data[1] = 1;
-	poly_1.data[2048] = 1;
-	poly_1.data[2049] = 2;
-	let mut poly_2 = PolyMatrixRaw::zero(&params, 2, 2);
-	poly_2.data[0] = 3;
+	//poly_1.data[2048] = 1;
+	//poly_1.data[2049] = 2;
+	let mut poly_2 = PolyMatrixRaw::zero(&params, 1, 1);
+	poly_2.data[0] = params.modulus - 3;
 	poly_2.data[1] = 4;
-	poly_2.data[2048] = 4;
-	poly_2.data[2049] = 3;
-	poly_2.data[4096] = 5;
-	poly_2.data[4097] = 6;
-	poly_2.data[6144] = 6;
-	poly_2.data[6145] = 5;
+	//poly_2.data[2048] = 4;
+	//poly_2.data[2049] = 3;
+	//poly_2.data[4096] = 5;
+	//poly_2.data[4097] = 6;
+	//poly_2.data[6144] = 6;
+	//poly_2.data[6145] = 5;
 	let mut poly_1_ntt = poly_1.ntt();
+	println!("{:?}", poly_1_ntt.as_slice());
 	let mut poly_2_ntt = poly_2.ntt();
-	let mut res_poly_ntt = PolyMatrixNTT::zero(&params, 1, 2);
+	let mut res_poly_ntt = PolyMatrixNTT::zero(&params, 2, 1);
+
+	add_into(&mut poly_2_ntt, &mut poly_1_ntt);
+	println!("poly2: {:?}", poly_2_ntt.raw().as_slice());
 	//println!("{:?}", res	
 	multiply(&mut res_poly_ntt, &poly_1_ntt, &poly_2_ntt);	 // 2 by 1  *  1 by 1
+	//scalar_multiply_avx(&mut res_poly_ntt, &poly_1_ntt, &poly_2_ntt);	
 	//multiply_poly(&params, res_poly_ntt.get_poly_mut(0, 0), poly_1_ntt.get_poly(0, 0), poly_2_ntt.get_poly(0, 0));
 	
-	println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 0)[0], res_poly_ntt.raw().get_poly(0, 0)[1], res_poly_ntt.raw().get_poly(0, 0)[2]); // how to print
-	println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 1)[0], res_poly_ntt.raw().get_poly(0, 1)[1], res_poly_ntt.raw().get_poly(0, 1)[2]); // how to print
+	//println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 0)[0], res_poly_ntt.raw().get_poly(0, 0)[1], res_poly_ntt.raw().get_poly(0, 0)[2]); // how to print
+	//println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 1)[0], res_poly_ntt.raw().get_poly(0, 1)[1], res_poly_ntt.raw().get_poly(0, 1)[2]); // how to print
 
 	
 	//assert_eq!(poly_1_ntt.get_poly(1, 0), poly_2_ntt.get_poly(0, 1));
@@ -682,5 +715,21 @@ mod test {
 	println!("{:?}", copied_poly.get_poly(1, 0));
 	
 	
+    }
+	
+    #[test]
+    fn test_submatrix(){
+	let params = params_for_scenario(1<<30, 1);
+	let mut poly_1 = PolyMatrixRaw::zero(&params, 2, 1);
+	poly_1.data[0] = 3;
+	poly_1.data[1] = 4;
+	poly_1.data[2048] = 5;
+	poly_1.data[2049] = 6;
+
+	let poly_0 = poly_1.submatrix(0, 0, 1, 1);
+	let poly_00 = poly_1.submatrix(1, 0, 1, 1);
+	
+	println!("0th: {:?}", poly_0.as_slice());
+	println!("1st: {:?}", poly_00.as_slice());
     }
 }

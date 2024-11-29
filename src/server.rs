@@ -41,11 +41,13 @@ pub fn generate_y_constants<'a>(
         let mut y_raw = PolyMatrixRaw::zero(params, 1, 1);
         y_raw.data[params.poly_len / num_cts] = 1;
 	println!("polylen: {}, num_cts: {}, poly/num_cts: {}", params.poly_len, num_cts, params.poly_len / num_cts);
+	println!("{:?}", y_raw.as_slice());
         let y = y_raw.ntt();
 	//println!("y: {:?}", y);
 
         let mut neg_y_raw = PolyMatrixRaw::zero(params, 1, 1);
         neg_y_raw.data[params.poly_len / num_cts] = params.modulus - 1;
+	//println!("{}", params.modulus - 1);
         let neg_y = neg_y_raw.ntt();
 
         y_constants.push(y);

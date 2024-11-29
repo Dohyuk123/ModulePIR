@@ -110,6 +110,9 @@ pub fn scalar_multiply_avx(res: &mut PolyMatrixNTT, a: &PolyMatrixNTT, b: &PolyM
             let res_poly = res.get_poly_mut(i, j);
             let pol1 = b.get_poly(i, j);
             crate::packing::multiply_poly_avx(params, res_poly, pol1, pol2);
+	    //for coef in res_poly.iter_mut() {
+	    //	*coef %= params.modulus;
+	    //}
         }
     }
 }
