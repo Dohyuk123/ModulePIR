@@ -1244,9 +1244,9 @@ mod test {
             let val = i as u64 % params.pt_modulus;
             let scale_k = params.modulus / params.pt_modulus;
             let mod_inv = invert_uint_mod(params.poly_len as u64, params.modulus).unwrap();
-            let val_to_enc = multiply_uint_mod(val * scale_k, mod_inv, params.modulus);
-            pt.data[0] = val_to_enc;
-            let ct = client.encrypt_matrix_reg(
+            let val_to_enc = multiply_uint_mod(val * scale_k, mod_inv, params.modulus); // scale_k * value
+            pt.data[0] = val_to_enc; // plaintext
+            let ct = client.encrypt_matrix_reg( // encrypt
                 &pt.ntt(),
                 &mut ChaCha20Rng::from_entropy(),
                 &mut ct_pub_rng,
@@ -1254,10 +1254,10 @@ mod test {
             let mut ct_raw = ct.raw();
 
             // get the b value
-            b_values.push(ct_raw.get_poly(1, 0)[0]);
+            b_values.push(ct_raw.get_poly(1, 0)[0]); // b values
 
             // zero out all of the second poly
-            ct_raw.get_poly_mut(1, 0).fill(0);
+            ct_raw.get_poly_mut(1, 0).fill(0); // (a, 0) values
             v_ct.push(ct_raw.ntt());
         }
 
@@ -1339,20 +1339,20 @@ mod test {
             let val = i as u64 % params.pt_modulus;
             let scale_k = params.modulus / params.pt_modulus;
             let mod_inv = invert_uint_mod(params.poly_len as u64, params.modulus).unwrap();
-            let val_to_enc = multiply_uint_mod(val * scale_k, mod_inv, params.modulus);
-            pt.data[0] = val_to_enc;
-            let ct = client.encrypt_matrix_reg(
+            let val_to_enc = multiply_uint_mod(val * scale_k, mod_inv, params.modulus); // val * scale_k
+            pt.data[0] = val_to_enc; // put value to constant
+            let ct = client.encrypt_matrix_reg( // encrypt pt
                 &pt.ntt(),
                 &mut ChaCha20Rng::from_entropy(),
                 &mut ct_pub_rng,
             );
-            let mut ct_raw = ct.raw();
+            let mut ct_raw = ct.raw(); // ciphertext raw
 
             // get the b value
-            b_values.push(ct_raw.get_poly(1, 0)[0]);
+            b_values.push(ct_raw.get_poly(1, 0)[0]); // array of b
 
             // zero out all of the second poly
-            ct_raw.get_poly_mut(1, 0).fill(0);
+            ct_raw.get_poly_mut(1, 0).fill(0); // array of a
             v_ct.push(ct_raw.ntt());
         }
 
@@ -1372,7 +1372,7 @@ mod test {
         println!("t_exp_left: {}", params.t_exp_left);
 
         let now = Instant::now();
-        let packed = pack_using_precomp_vals(
+        let packed = pack_using_precomp_vals( // packed rlwes
             &params,
             params.poly_len_log2,
             &pack_pub_params_row_1s,
@@ -1398,7 +1398,7 @@ mod test {
             rescaled.data[i] = rescale(dec_raw.data[i], params.modulus, params.pt_modulus);
         }
 
-        println!("rescaled: {:?}", &rescaled.as_slice()[..50]);
+        println!("rescaled: {:?}", &rescaled.as_slice());//[..50]);
         let mut gold = PolyMatrixRaw::zero(&params, 1, 1);
         for i in 0..params.poly_len {
             gold.data[i] = i as u64 % params.pt_modulus;
@@ -1597,7 +1597,6 @@ mod test {
 
 	let t = 3;
 	let mut plain_auto = PolyMatrixRaw::zero(&params, 1, 1);
-	//let mut ct_auto = PolyMatrixRaw::zero(&params, 2, 1);
 	let mut auto_exp = PolyMatrixRaw::zero(&params, 1, 1);
 	for i in 0..params.poly_len{
 	    auto_exp.data[i] = (i as u64) * (scale_k as u64);
@@ -1640,7 +1639,7 @@ mod test {
 	let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1); // concatenate A and B
 	for i in 0..2*params.poly_len{
 	    ct_result.data[i] = w_times_ginv_ct_a.data[i];
-	    ct_result.data[2*params.poly_len + i] = w_times_ginv_ct_b.data[i];
+	    ct_result.data[2*params.poly_len + i] = ct_result_b.data[i];
 	}
 	
 	let dec_result = client.decrypt_matrix_reg(&ct_result);
