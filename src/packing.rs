@@ -1635,12 +1635,6 @@ mod test {
 
 	let scale_k = params.modulus / params.pt_modulus; //scaling factor
 
-	//gadgets
-	let mut g_inv_a = PolyMatrixRaw::zero(&params, t_exp, 1);
-	let mut g_inv_a_ntt = PolyMatrixNTT::zero(&params, t_exp, 1);
-	let mut g_inv_b = PolyMatrixRaw::zero(&params, t_exp, 1);
-	let mut g_inv_b_ntt = PolyMatrixNTT::zero(&params, t_exp, 1);
-
 	let t = 3;
 	let mut plain_auto = PolyMatrixRaw::zero(&params, 1, 1);
 	let mut auto_exp = PolyMatrixRaw::zero(&params, 1, 1);
@@ -1868,89 +1862,68 @@ mod test {
     #[test]
     fn test_query_expansion(){
 	let params = params_for_scenario(1 << 30, 1);
-	let y_constants = generate_y_constants(&params);
 	let mut client = Client::init(&params);
 	client.generate_secret_keys(); //generate secret key
+	
 
+	let t_exp = params.t_exp_left;
 	let pack_seed = [1u8; 32];
-	let pack_pub_params = raw_generate_expansion_params(&params, client.get_sk_reg(), params.poly_len_log2, params.t_exp_left, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed));
+	let pub_params = raw_generate_expansion_params(&params, client.get_sk_reg(), params.poly_len_log2, params.t_exp_left, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed));
 	
 	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
 
 	let scale_k = params.modulus / params.pt_modulus; //scaling factor
-	let pt_byte_log2 = 4; // mlwe bit log2
-	let pt_byte = 1<<4; // mlwe byte
-	let query_index = 3; // query index
-	
-	let mut plaintext = PolyMatrixRaw::zero(&params, 1, 1); // plaintext polynomial
 
-	let factor = invert_uint_mod(params.poly_len as u64, params.modulus).unwrap(); // 1/poly_len
+	let t = 3;
+	let mut query = PolyMatrixRaw::zero(&params, 1, 1);
+	query.data[7] = scale_k;
 
-	plaintext.data[query_index] = scale_k; // scaling factor
+////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////start////////////////////////////////////////////
+	let ct_0 = client.encrypt_matrix_reg(&query.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); //
+	let mut ct_0_a = ct_0.submatrix(0, 0, 1, 1);
+	let mut ct_0_b = ct_0.submatrix(1, 0, 1, 1);
 
-	let ct = client.encrypt_matrix_reg(&plaintext.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); // encrypted ciphertext
+	let mut ct_1 = PolyMatrixNTT::zero(&params, 2, 1);
+	let mut plain_mult = PolyMatrixRaw::zero(&params, 1, 1);
+	plain_mult.data[2047] = params.modulus - 1; // automorph -1 // if automorph -k, plain_mult.data[2048 - k]
+	multiply(&mut ct_1, &ct_0, &plain_mult.ntt());	
 
-	let mut ct_right = PolyMatrixNTT::zero(&params, 2, 1); // result ciphertext to be multiplied
-	let mut auto_exp = PolyMatrixRaw::zero(&params, 1, 1);
-	for i in 0..params.poly_len{
-	    auto_exp.data[i] = (i as u64) * (scale_k as u64);
+	let mut ct_1_a = ct_1.submatrix(0, 0, 1, 1);
+	let mut ct_1_b = ct_1.submatrix(1, 0, 1, 1);
+
+	let (ct_result_a, decomp_a) = homomorphic_automorph_a(&params, 2049, t_exp, &ct_1_a, &pub_params[0].submatrix(0, 0, 1, 3));
+	let ct_result_b = homomorphic_automorph_b(&params, 2049, t_exp, &ct_1_b, &pub_params[0].submatrix(1, 0, 1, 3), &decomp_a);
+
+	let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1);
+	for i in 0..params.poly_len * 2{
+	    ct_result.data[i] = ct_result_a.data[i];
+	    ct_result.data[2 * params.poly_len + i] = ct_result_b.data[i];	
 	}
-	let ct_auto = client.encrypt_matrix_reg(&auto_exp.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); // automorphism target
 
-	let mut after_auto = PolyMatrixNTT::zero(&params, 1, 1);
-
-
-	//let ct_auto = 
-	//let mut cts = vec![PolyMatrixNTT::zero(&params, 2, 1); pt_byte];
-	 
-	
-	let t = params.poly_len - (1<<2); // x^-2
-	println!("{}, {}, {}, {}", t, params.modulus, params.poly_len, 1<<2);
-	let mut poly_auto = PolyMatrixRaw::zero(&params, 1, 1);
-	poly_auto.data[t] = params.modulus - 1;
-	println!("poly_auto {:?}", poly_auto.ntt().as_slice());
-	let mut poly_auto_ntt = poly_auto.ntt();
-	
-	    
-	//let mut ct_left = &cts[0];	//encrypted
-
-	//println!("ciphertext: {:?}", ct.raw().as_slice());
-	let dec_result = client.decrypt_matrix_reg(&ct);
+	let dec_result = client.decrypt_matrix_reg(&ct_result);
 	let dec_result_raw = dec_result.raw();
 	let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
 	for z in 0..dec_rescaled.data.len() {
 	    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
 	}
+	println!("auto result c1 : {:?}", dec_rescaled.as_slice());
+
+	let (ct_result_a, decomp_a) = homomorphic_automorph_a(&params, 2049, t_exp, &ct_0_a, &pub_params[0].submatrix(0, 0, 1, 3));
+	let ct_result_b = homomorphic_automorph_b(&params, 2049, t_exp, &ct_0_b, &pub_params[0].submatrix(1, 0, 1, 3), &decomp_a);
 	
-	println!("ct : {:?}", dec_rescaled.as_slice());
-	//let y = &y_constants.0[0];
-	//scalar_multiply_avx(&mut ct_right, &poly_auto_ntt , &ct);
+	let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1);
+	for i in 0..params.poly_len * 2{
+	    ct_result.data[i] = ct_result_a.data[i];
+	    ct_result.data[2 * params.poly_len + i] = ct_result_b.data[i];	
+	}
 
-	multiply(&mut after_auto, &auto_exp.ntt(), &poly_auto_ntt);
-	println!("auto exp: {:?}", after_auto.raw().as_slice());
-
-	multiply(&mut ct_right, &ct, &poly_auto_ntt);// &poly_auto_ntt); // ct: ntt
-			
-	//decryption
-	let dec_result = client.decrypt_matrix_reg(&ct_right);
+	let dec_result = client.decrypt_matrix_reg(&ct_result);
 	let dec_result_raw = dec_result.raw();
 	let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
 	for z in 0..dec_rescaled.data.len() {
 	    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
 	}
-		//
-
-	println!("after auto: {:?}", dec_rescaled.as_slice());
-
-	
-	    
-	
-/* how to decrypt
-	let dec_result = client.decrypt_matrix_reg(ct_left).raw();
-	let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result.rows, dec_result.cols);
-	for z in 0..dec_rescaled.data.len() {
-	    dec_rescaled.data[z] = rescale(dec_result.data[z], params.modulus, params.pt_modulus);
-	}
-*/
+	println!("auto result c0 : {:?}", dec_rescaled.as_slice());
     }
 }
