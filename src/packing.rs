@@ -1861,6 +1861,9 @@ mod test {
 
     #[test]
     fn test_query_expansion(){
+
+	let pt_byte = 8;
+	let pt_byte_log = 3;
 	let params = params_for_scenario(1 << 30, 1);
 	let mut client = Client::init(&params);
 	client.generate_secret_keys(); //generate secret key
@@ -1880,6 +1883,68 @@ mod test {
 
 ////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////start////////////////////////////////////////////
+
+
+/*	
+	let ct_0 = client.encrypt_matrix_reg(&query.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); //
+	let mut ct_0_a = ct_0.submatrix(0, 0, 1, 1);
+	let mut ct_0_b = ct_0.submatrix(1, 0, 1, 1);
+
+	let mut ct_a_vec = Vec::new();
+	let mut ct_b_vec = Vec::new();
+
+	ct_a_vec.push(ct_0_a);
+	ct_b_vec.push(ct_0_b);
+
+	for i in 0..pt_byte_log{
+	    let auto_num = 1<<i;
+	    for k in 0..auto_num{
+		let mut ct_mult_result_a = PolyMatrixNTT::zero(&params, 1, 1); // ct_a_vec[k] : c0
+		let mut ct_mult_result_b = PolyMatrixNTT::zero(&params, 1, 1);
+		let mut plain_mult = PolyMatrixRaw::zero(&params, 1, 1);
+		plain_mult.data[params.poly_len - auto_num];
+		multiply(&mut ct_mult_result_a, &ct_a_vec[k], &plain_mult.ntt()); // ct_mult_result : c1
+		multiply(&mut ct_mult_result_b, &ct_b_vec[k], &plain_mult.ntt());
+		
+		let (mut ct_0_result_a, mut decomp_a) = homomorphic_automorph_a(&params, (params.poly_len >> auto_num) + 1, t_exp, &ct_a_vec[k], &pub_params[i].submatrix(0, 0, 1, 3)); // automorph c2
+		let mut ct_0_result_b = homomorphic_automorph_b(&params, (params.poly_len >> auto_num) + 1, t_exp, &ct_b_vec[k], &pub_params[i].submatrix(1, 0, 1, 3), &decomp_a);
+
+		let (mut ct_1_result_a, mut decomp_a) = homomorphic_automorph_a(&params, (params.poly_len >> auto_num) + 1, t_exp, &ct_mult_result_a, &pub_params[i].submatrix(0, 0, 1, 3)); //automorph c1
+		let mut ct_1_result_b = homomorphic_automorph_b(&params, (params.poly_len >> auto_num) + 1, t_exp, &ct_mult_result_b, &pub_params[i].submatrix(1, 0, 1, 3), &decomp_a);
+
+		add_into(&mut ct_0_result_a, &mut ct_a_vec[k]);
+		add_into(&mut ct_0_result_b, &mut ct_b_vec[k]);
+
+		add_into(&mut ct_1_result_a, &mut ct_mult_result_a);
+		add_into(&mut ct_1_result_b, &mut ct_mult_result_b);
+		
+		ct_a_vec[k] = ct_0_result_a;
+		ct_a_vec.push(ct_1_result_a);
+		
+		ct_b_vec[k] = ct_0_result_b;
+		ct_b_vec.push(ct_1_result_b);
+	    }
+	}
+
+	println!("vec length : {}", ct_b_vec.len());
+
+	for i in 0..ct_a_vec.len(){
+	    let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1);
+	    for j in 0..params.poly_len * 2{
+	        ct_result.data[i] = ct_a_vec[i].data[j];
+	        ct_result.data[2 * params.poly_len + j] = ct_b_vec[i].data[j];	
+	    }
+
+	    let dec_result = client.decrypt_matrix_reg(&ct_result);
+	    let dec_result_raw = dec_result.raw();
+	    let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
+	    for z in 0..dec_rescaled.data.len() {
+	        dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
+	    }
+	    //println!("auto result c1 : {:?}", dec_rescaled.as_slice());
+	}
+*/
+
 	let ct_0 = client.encrypt_matrix_reg(&query.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); //
 	let mut ct_0_a = ct_0.submatrix(0, 0, 1, 1);
 	let mut ct_0_b = ct_0.submatrix(1, 0, 1, 1);
@@ -1892,14 +1957,19 @@ mod test {
 	let mut ct_1_a = ct_1.submatrix(0, 0, 1, 1);
 	let mut ct_1_b = ct_1.submatrix(1, 0, 1, 1);
 
-	let (ct_result_a, decomp_a) = homomorphic_automorph_a(&params, 2049, t_exp, &ct_1_a, &pub_params[0].submatrix(0, 0, 1, 3));
-	let ct_result_b = homomorphic_automorph_b(&params, 2049, t_exp, &ct_1_b, &pub_params[0].submatrix(1, 0, 1, 3), &decomp_a);
+	let (mut ct_result_a, decomp_a) = homomorphic_automorph_a(&params, 2049, t_exp, &ct_1_a, &pub_params[0].submatrix(0, 0, 1, 3)); //c1
+	let mut ct_result_b = homomorphic_automorph_b(&params, 2049, t_exp, &ct_1_b, &pub_params[0].submatrix(1, 0, 1, 3), &decomp_a);
+
+	add_into(&mut ct_result_a, &mut ct_1_a);
+	add_into(&mut ct_result_b, &mut ct_1_b);	
 
 	let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1);
 	for i in 0..params.poly_len * 2{
 	    ct_result.data[i] = ct_result_a.data[i];
 	    ct_result.data[2 * params.poly_len + i] = ct_result_b.data[i];	
 	}
+
+
 
 	let dec_result = client.decrypt_matrix_reg(&ct_result);
 	let dec_result_raw = dec_result.raw();
@@ -1909,9 +1979,13 @@ mod test {
 	}
 	println!("auto result c1 : {:?}", dec_rescaled.as_slice());
 
-	let (ct_result_a, decomp_a) = homomorphic_automorph_a(&params, 2049, t_exp, &ct_0_a, &pub_params[0].submatrix(0, 0, 1, 3));
-	let ct_result_b = homomorphic_automorph_b(&params, 2049, t_exp, &ct_0_b, &pub_params[0].submatrix(1, 0, 1, 3), &decomp_a);
+
+	let (mut ct_result_a, decomp_a) = homomorphic_automorph_a(&params, 2049, t_exp, &ct_0_a, &pub_params[0].submatrix(0, 0, 1, 3)); // c0
+	let mut ct_result_b = homomorphic_automorph_b(&params, 2049, t_exp, &ct_0_b, &pub_params[0].submatrix(1, 0, 1, 3), &decomp_a);
 	
+	add_into(&mut ct_result_a, &mut ct_0_a);
+	add_into(&mut ct_result_b, &mut ct_0_b);
+
 	let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1);
 	for i in 0..params.poly_len * 2{
 	    ct_result.data[i] = ct_result_a.data[i];
@@ -1925,5 +1999,7 @@ mod test {
 	    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
 	}
 	println!("auto result c0 : {:?}", dec_rescaled.as_slice());
+
+
     }
 }
