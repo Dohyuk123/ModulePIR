@@ -1360,7 +1360,7 @@ mod test {
 
     use crate::{
         client::*, params::params_for_scenario,
-        server::generate_y_constants,
+        server::*,
     };
 
     use super::*;
