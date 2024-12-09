@@ -50,13 +50,42 @@ fn homomorphic_automorph_a<'a>(
     ct: &PolyMatrixNTT<'a>, // only a part
     pub_param: &PolyMatrixNTT<'a>, //only A part
 ) -> (PolyMatrixNTT<'a>, PolyMatrixNTT<'a>) {
+    let mut w_times_ginv_ct = PolyMatrixNTT::zero(params, 1, 1);
     let ct_raw = ct.raw();
     let ct_auto = automorph_alloc(&ct_raw, t);
 	
     let mut ginv_ct = PolyMatrixRaw::zero(params, t_exp, 1);// at the outside?
     gadget_invert_rdim(&mut ginv_ct, &ct_auto, 1);  // decomp a
 
-    println!("gadget: {}, {}", ginv_ct.data[1], ginv_ct.data[2048]);
+    //println!("gadget: {}, {}", ginv_ct.data[1], ginv_ct.data[2048]);
+    let mut ginv_ct_ntt = PolyMatrixNTT::zero(params, t_exp, 1);
+    for i in 1..t_exp {
+	let pol_src = ginv_ct.get_poly(i, 0);
+	let pol_dst = ginv_ct_ntt.get_poly_mut(i, 0);
+	reduce_copy(params, pol_dst, pol_src);
+	ntt_forward(params, pol_dst);
+    } // at the outside?
+	
+    //multiply_no_reduce(&mut w_times_ginv_ct, &pub_param, &ginv_ct_ntt, 0);    
+
+    (pub_param * &ginv_ct_ntt, ginv_ct_ntt) // a*A
+
+}
+
+fn homomorphic_automorph_a_slice<'a>(
+    params: &'a Params,
+    t: usize,
+    t_exp: usize,
+    ct: &PolyMatrixNTT<'a>, // only a part
+    pub_param: &PolyMatrixNTT<'a>, //only A part
+) -> (PolyMatrixNTT<'a>, PolyMatrixNTT<'a>) {
+    let ct_raw = ct.raw();
+    let ct_auto = automorph_alloc(&ct_raw, t);
+	
+    let mut ginv_ct = PolyMatrixRaw::zero(params, t_exp, 1);// at the outside?
+    gadget_invert_rdim(&mut ginv_ct, &ct_auto, 1);  // decomp a
+
+    //println!("gadget: {}, {}", ginv_ct.data[1], ginv_ct.data[2048]);
     let mut ginv_ct_ntt = PolyMatrixNTT::zero(params, t_exp, 1);
     for i in 1..t_exp {
 	let pol_src = ginv_ct.get_poly(i, 0);
@@ -82,12 +111,86 @@ fn homomorphic_automorph_b<'a>(
     
     let w_times_ginv_ct_b = pub_param * &ginv_ct_ntt; // B part * a part decomp
 
-    let mut ct_auto_1 = PolyMatrixRaw::zero(params, 1, 1); // b part
-    ct_auto_1.data.as_mut_slice().copy_from_slice(ct_auto.get_poly(0, 0));
-    let ct_auto_1_ntt = ct_auto_1.ntt();
+    //let mut ct_auto_1 = PolyMatrixRaw::zero(params, 1, 1); // b part
+    //ct_auto_1.data.as_mut_slice().copy_from_slice(ct_auto.get_poly(0, 0));
+    //let ct_auto_1_ntt = ct_auto_1.ntt();
 
-    &ct_auto_1_ntt + &w_times_ginv_ct_b // b + aB
+    &ct_auto.ntt() + &w_times_ginv_ct_b // b + aB
 }
+
+pub fn prep_query_expansion<'a>(
+    params: &'a Params,
+    pt_byte_log: usize,
+    t_exp: usize,
+    ct_a: PolyMatrixNTT<'a>,
+    pub_param: &[PolyMatrixNTT<'a>],
+) -> (Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>) {
+
+    let mut ct_1_a = PolyMatrixNTT::zero(params, 1, 1);
+    let mut decomp_a_vec = Vec::new();
+    let mut ct_a_vec = Vec::new();
+    ct_a_vec.push(ct_a);
+
+    for i in 0..pt_byte_log {
+	for k in 0..(1<<i) {
+	    let mut plain_mult = PolyMatrixRaw::zero(params, 1, 1);
+	    plain_mult.data[params.poly_len - (1<<i)] = params.modulus - 1;
+
+	    multiply(&mut ct_1_a, &ct_a_vec[k], &plain_mult.ntt());
+
+	    let (mut ct_0_result_a, decomp_a_0) = homomorphic_automorph_a(params, (params.poly_len >> i) + 1, t_exp, &ct_a_vec[k], &pub_param[i]);
+	    let (mut ct_1_result_a, decomp_a_1) = homomorphic_automorph_a(params, (params.poly_len >> i) + 1, t_exp, &ct_1_a, &pub_param[i]);
+	    
+	    //println!("{}, {}, {}, {}", ct_0_result_a.get_rows(), ct_0_result_a.get_cols(), ct_a_vec[k].get_rows(), ct_a_vec[k].get_cols());
+	    add_into(&mut ct_0_result_a, &mut ct_a_vec[k]);
+	    add_into(&mut ct_1_result_a, &mut ct_1_a);
+
+	    ct_a_vec[k] = ct_0_result_a;
+	    ct_a_vec.push(ct_1_result_a);
+	    decomp_a_vec.push(decomp_a_0);
+	    decomp_a_vec.push(decomp_a_1);
+	}
+    }
+
+    (ct_a_vec, decomp_a_vec)
+}
+
+pub fn query_expansion<'a>(
+    params: &'a Params,
+    pt_byte_log: usize,
+    t_exp: usize,
+    ct_b: PolyMatrixNTT<'a>,
+    pub_param: &[PolyMatrixNTT<'a>],
+    decomp_a_vec: &[PolyMatrixNTT<'a>],
+) -> Vec<PolyMatrixNTT<'a>> {
+
+    let mut ct_1_b = PolyMatrixNTT::zero(params, 1, 1);
+    let mut ct_b_vec = Vec::new();
+    ct_b_vec.push(ct_b);
+
+    let mut index = 0;
+    for i in 0..pt_byte_log {
+	for k in 0..(1<<i) {
+	    let mut plain_mult = PolyMatrixRaw::zero(params, 1, 1);
+	    plain_mult.data[params.poly_len - (1<<i)] = params.modulus - 1;
+
+	    multiply(&mut ct_1_b, &ct_b_vec[k], &plain_mult.ntt());
+
+	    let mut ct_0_result_b = homomorphic_automorph_b(params, (params.poly_len >> i) + 1, t_exp, &ct_b_vec[k], &pub_param[i], &decomp_a_vec[index]);
+	    let mut ct_1_result_b = homomorphic_automorph_b(params, (params.poly_len >> i) + 1, t_exp, &ct_1_b, &pub_param[i], &decomp_a_vec[index + 1]);
+
+	    add_into(&mut ct_0_result_b, &mut ct_b_vec[k]);
+	    add_into(&mut ct_1_result_b, &mut ct_1_b);
+
+	    ct_b_vec[k] = ct_0_result_b;
+	    ct_b_vec.push(ct_1_result_b);
+	    index = index + 2;
+	}
+    }
+    
+    ct_b_vec
+}
+
 
 pub fn pack_lwes_inner<'a>(
     params: &'a Params,
@@ -1551,7 +1654,50 @@ mod test {
             );
         }
     }
+
+    #[test]
+    fn test_auto_slice(){
+	let params = params_for_scenario(1 << 30, 1);
+	let mut client = Client::init(&params);
+	client.generate_secret_keys(); //generate secret key
 	
+
+	let t_exp = params.t_exp_left;
+	let pack_seed = [1u8; 32];
+	let pub_params = raw_generate_expansion_params(&params, client.get_sk_reg(), params.poly_len_log2, params.t_exp_left, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed));
+	
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+
+	let scale_k = params.modulus / params.pt_modulus; //scaling factor
+
+	//gadgets
+	let mut g_inv_a = PolyMatrixRaw::zero(&params, t_exp, 1);
+	let mut g_inv_a_ntt = PolyMatrixNTT::zero(&params, t_exp, 1);
+	let mut g_inv_b = PolyMatrixRaw::zero(&params, t_exp, 1);
+	let mut g_inv_b_ntt = PolyMatrixNTT::zero(&params, t_exp, 1);
+
+	let t = 3;
+	let mut plain_auto = PolyMatrixRaw::zero(&params, 1, 1);
+	//let mut ct_auto = PolyMatrixRaw::zero(&params, 2, 1);
+	let mut auto_exp = PolyMatrixRaw::zero(&params, 1, 1);
+	for i in 0..params.poly_len{
+	    auto_exp.data[i] = (i as u64) * (scale_k as u64);
+	}
+
+	let ct = client.encrypt_matrix_reg(&auto_exp.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); //
+	
+	
+	let mut ct_a = ct.submatrix(0, 0, 1, 1);
+	let mut ct_b = ct.submatrix(1, 0, 1, 1);
+	
+	let (ct_result_a, decomp_a) = homomorphic_automorph_a(&params, 3, t_exp, &ct_a, &pub_params[10].submatrix(0, 0, 1, 3)); // a and A
+
+	let start = Instant::now();
+	let ct_result_b = homomorphic_automorph_b(&params, 3, t_exp, &ct_b, &pub_params[10].submatrix(1, 0, 1, 3), &decomp_a); // b and B + decomp a
+	let end = Instant::now();	
+
+    }
+    
     #[test]
     fn test_auto_fn(){
 	let params = params_for_scenario(1 << 30, 1);
@@ -1651,7 +1797,13 @@ mod test {
 	let mut ct_b = ct.submatrix(1, 0, 1, 1);
 	
 	let (ct_result_a, decomp_a) = homomorphic_automorph_a(&params, 3, t_exp, &ct_a, &pub_params[10].submatrix(0, 0, 1, 3)); // a and A
-	let ct_result_b = homomorphic_automorph_b(&params, 3, t_exp, &ct_b, &pub_params[10].submatrix(1, 0, 1, 3), &decomp_a); // b and B + decomp a
+
+	let pub_b = pub_params[10].submatrix(1, 0, 1, 3);
+	let start = Instant::now();
+	let ct_result_b = homomorphic_automorph_b(&params, 3, t_exp, &ct_b, &pub_b, &decomp_a); // b and B + decomp a
+	let end = Instant::now();
+
+	println!("auto sep: {:?}", end - start);
 
 	let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1); // concatenate A and B
 	for i in 0..2*params.poly_len{
@@ -1666,6 +1818,8 @@ mod test {
 	    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
 	}
 	println!("auto result : {:?}", dec_rescaled.as_slice());
+
+	
     }
 	
     #[test]
@@ -1846,7 +2000,7 @@ mod test {
 	let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1);
 	for i in 0..params.poly_len * 2{
 	    ct_result.data[i] = ct_res_a_ntt.data[i];
-	    ct_result.data[params.poly_len + i] = ct_res_b_ntt.data[i];	
+	    ct_result.data[params.poly_len + i] = ct_res_b_ntt.data[i];
 	}
 
 	let dec_result = client.decrypt_matrix_reg(&ct_result);
@@ -1860,10 +2014,73 @@ mod test {
     }
 
     #[test]
+    fn test_query_expansion_fn(){
+	let pt_byte = 128;
+	let pt_byte_log = 7;
+	let params = params_for_scenario(1 << 30, 1);
+	let mut client = Client::init(&params);
+	client.generate_secret_keys(); //generate secret key
+	
+	let t_exp = params.t_exp_left;
+	let pack_seed = [1u8; 32];
+	let pub_params = raw_generate_expansion_params(&params, client.get_sk_reg(), params.poly_len_log2, params.t_exp_left, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed));
+
+	let mut pub_params_a = Vec::new();
+	let mut pub_params_b = Vec::new();
+	for i in 0..pub_params.len() {
+	    pub_params_a.push(pub_params[i].submatrix(0, 0, 1, 3));
+	    pub_params_b.push(pub_params[i].submatrix(1, 0, 1, 3));
+	}
+	
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+
+	let scale_k = params.modulus / params.pt_modulus; //scaling factor
+
+	let t = 3;
+	let mut query = PolyMatrixRaw::zero(&params, 1, 1);
+	query.data[2] = scale_k; // query index
+
+////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////start////////////////////////////////////////////
+	
+	let ct = client.encrypt_matrix_reg(&query.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); //
+	let mut ct_a = ct.submatrix(0, 0, 1, 1);
+	let mut ct_b = ct.submatrix(1, 0, 1, 1);
+	
+	
+	let (mut ct_a_vec, decomp_a_vec) = prep_query_expansion(&params, pt_byte_log, t_exp, ct_a, &pub_params_a);
+
+	let start = Instant::now();	
+	let mut ct_b_vec = query_expansion(&params, pt_byte_log, t_exp, ct_b, &pub_params_b, &decomp_a_vec);
+
+	let end = Instant::now();
+
+	for i in 0..ct_a_vec.len(){
+	    let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1);
+	    for j in 0..params.poly_len * 2{
+	        ct_result.data[j] = ct_a_vec[i].data[j];
+	        ct_result.data[2 * params.poly_len + j] = ct_b_vec[i].data[j];	
+	    }
+
+	    let dec_result = client.decrypt_matrix_reg(&ct_result);
+	    let dec_result_raw = dec_result.raw();
+	    let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
+	    for z in 0..dec_rescaled.data.len() {
+	        dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
+	    }
+	    println!("auto result c1 : {:?}", dec_rescaled.as_slice());
+	}
+
+	println!("expansion fn time : {:?}", end - start);
+
+	
+    }
+
+    #[test]
     fn test_query_expansion(){
 
-	let pt_byte = 8;
-	let pt_byte_log = 3;
+	let pt_byte = 128;
+	let pt_byte_log = 7;
 	let params = params_for_scenario(1 << 30, 1);
 	let mut client = Client::init(&params);
 	client.generate_secret_keys(); //generate secret key
@@ -1895,6 +2112,8 @@ mod test {
 	ct_b_vec.push(ct_0_b);
 
 ///////////////////////////////////////////////////////////
+
+	let start = Instant::now();
 
 	for i in 0..pt_byte_log{
 	    let auto_num = 1<<i;
@@ -1928,7 +2147,7 @@ mod test {
 	    }
 	}
 
-	println!("vec length : {}", ct_b_vec.len());
+	let end = Instant::now();
 
 	for i in 0..ct_a_vec.len(){
 	    let mut ct_result = PolyMatrixNTT::zero(&params, 2, 1);
@@ -1945,6 +2164,8 @@ mod test {
 	    }
 	    println!("auto result c1 : {:?}", dec_rescaled.as_slice());
 	}
+
+	println!("expansion time : {:?}", end - start);
 
 /*
 	let ct_0 = client.encrypt_matrix_reg(&query.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); //

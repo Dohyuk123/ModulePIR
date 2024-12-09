@@ -83,8 +83,8 @@ pub fn raw_generate_expansion_params<'a>(
     rng_pub: &mut ChaCha20Rng,
 ) -> Vec<PolyMatrixNTT<'a>> {
     let g_exp = build_gadget(params, 1, m_exp);
-    debug!("using gadget base {}", g_exp.get_poly(0, 1)[0]);
-    println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
+    //debug!("using gadget base {}", g_exp.get_poly(0, 1)[0]);
+    //println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
     let g_exp_ntt = g_exp.ntt();
     let mut res = Vec::new();
 
@@ -665,7 +665,7 @@ mod test {
 	//poly_1.data[2048] = 1;
 	//poly_1.data[2049] = 2;
 	let mut poly_2 = PolyMatrixRaw::zero(&params, 1, 1);
-	poly_2.data[0] = params.modulus - 3;
+	poly_2.data[0] = 3;
 	poly_2.data[1] = 4;
 	//poly_2.data[2048] = 4;
 	//poly_2.data[2049] = 3;
@@ -674,16 +674,19 @@ mod test {
 	//poly_2.data[6144] = 6;
 	//poly_2.data[6145] = 5;
 	let mut poly_1_ntt = poly_1.ntt();
-	println!("{:?}", poly_1_ntt.as_slice());
+	//println!("{:?}", poly_1_ntt.as_slice());
 	let mut poly_2_ntt = poly_2.ntt();
 	let mut res_poly_ntt = PolyMatrixNTT::zero(&params, 2, 1);
 
-	add_into(&mut poly_2_ntt, &mut poly_1_ntt);
-	println!("poly2: {:?}", poly_2_ntt.raw().as_slice());
+	//add_into(&mut poly_2_ntt, &mut poly_1_ntt);
+	//println!("poly2: {:?}", poly_2_ntt.raw().as_slice());
 	//println!("{:?}", res	
-	multiply(&mut res_poly_ntt, &poly_1_ntt, &poly_2_ntt);	 // 2 by 1  *  1 by 1
+	//multiply(&mut res_poly_ntt, &poly_1_ntt, &poly_2_ntt);	 // 2 by 1  *  1 by 1
 	//scalar_multiply_avx(&mut res_poly_ntt, &poly_1_ntt, &poly_2_ntt);	
-	//multiply_poly(&params, res_poly_ntt.get_poly_mut(0, 0), poly_1_ntt.get_poly(0, 0), poly_2_ntt.get_poly(0, 0));
+	multiply_poly(&params, res_poly_ntt.get_poly_mut(0, 0), poly_1_ntt.get_poly(0, 0), poly_2_ntt.get_poly(0, 0));
+
+	println!("res: {:?}", res_poly_ntt.raw().as_slice());
+	
 	
 	//println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 0)[0], res_poly_ntt.raw().get_poly(0, 0)[1], res_poly_ntt.raw().get_poly(0, 0)[2]); // how to print
 	//println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 1)[0], res_poly_ntt.raw().get_poly(0, 1)[1], res_poly_ntt.raw().get_poly(0, 1)[2]); // how to print
