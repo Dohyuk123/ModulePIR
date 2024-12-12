@@ -60,6 +60,24 @@ pub fn mlwe_to_mlwe_a(params: &Params, a: &Vec<u64>, mlwe_dim: usize, n: usize, 
     }
     combined_vec
 }
+ // n : poly len //mlwe_dim : input mlwe dimension
+pub fn mlwe_to_mlwe_b(params: &Params, a: &Vec<u64>, mlwe_dim: usize, n: usize) -> Vec<u64>{
+    let mut combined_vec: Vec<u64> = vec![0; n]; // Allocate memory once
+    let half_mlwe_dim = mlwe_dim / 2;
+
+    for j in 0..n / mlwe_dim {
+       	// Process even_front_odd_back
+        let mut even_front_odd_back: Vec<u64> = (0..half_mlwe_dim)
+	    .map(|k| a[j * mlwe_dim + 2 * k])
+	    .chain ((0..half_mlwe_dim).map(|k| a[j * mlwe_dim + 2 * k + 1]))
+	    .collect();
+	//println!("len: {}", even_front_odd_back.len());
+
+	combined_vec[j * mlwe_dim .. j * mlwe_dim + mlwe_dim].copy_from_slice(&even_front_odd_back);    
+	//println!("{:?}", combined_vec);
+    }
+    combined_vec
+}
 
 pub fn rlwe_to_mlwe_a(params: &Params, a: &Vec<u64>, log_pt_byte: usize) -> Vec<u64> {
     let n = 1 << params.poly_len_log2;
@@ -69,6 +87,23 @@ pub fn rlwe_to_mlwe_a(params: &Params, a: &Vec<u64>, log_pt_byte: usize) -> Vec<
 	mlwe_vector = mlwe_to_mlwe_a(params, &mlwe_vector, n >> i, n, n << i);
     }
     mlwe_vector
+}
+
+//params: original params
+pub fn rlwe_to_mlwe_b(params: &Params, a: &Vec<u64>, log_pt_byte: usize) -> Vec<u64> {
+    let n = 1 << params.poly_len_log2;
+    let mut mlwe_vector = mlwe_to_mlwe_b(params, &a, n, n);
+
+    for i in 1..(params.poly_len_log2 - log_pt_byte) {
+	mlwe_vector = mlwe_to_mlwe_b(params, &mlwe_vector, n >> i, n);
+    }
+    mlwe_vector
+}
+
+pub fn mlwe_to_rlwe_b<'a>(params: &'a Params, output_poly: &mut PolyMatrixRaw<'a>, mlwe_poly: &[u64], mlwe_bit: usize, index: usize) {
+    for i in 0..(1<<(mlwe_bit)) {
+	output_poly.data[index * (params.poly_len) + i * (1<<(params.poly_len_log2 - mlwe_bit))] = mlwe_poly[i];
+    }
 }
 
 //a: input mlwe, log_pt_byte: mlwe byte     ->      mlwe_dim -> 2*mlwe_dim
@@ -2642,15 +2677,35 @@ mod test {
 	println!("modulus : {}", params.modulus);
     }
 
+    #[test]
     fn test_mlwe_b() {
 	let mut params = get_test_params();
 	let mut mlwe_params = params.clone();
-	let mlwe_bit = 1;
+	let mlwe_bit = 2;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
 	params.poly_len_log2 = 3;
 	params.poly_len = 1<<params.poly_len_log2;
 	mlwe_params.poly_len_log2 = mlwe_bit;
 	mlwe_params.poly_len = 1<<mlwe_bit;
+
+	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
+	for i in 0..params.poly_len{
+	    poly.data[i] = (i+1) as u64;
+	}
+
+	let mut mlwe = rlwe_to_mlwe_b(&params, &poly.as_slice().to_vec(), mlwe_bit);
+	let mut mlwe_result = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, 1);
+	mlwe_result.as_mut_slice().copy_from_slice(&mlwe);
+
+	println!("{:?}", mlwe_result.as_slice());
+	
+	let mut output_poly = PolyMatrixRaw::zero(&params, 1, 1);
+
+	mlwe_to_rlwe_b(&params, &mut output_poly, mlwe_result.get_poly(0, 0), mlwe_bit, 0);
+
+	println!("{:?}", output_poly.as_slice());
+	
+
     }
 }

@@ -561,6 +561,15 @@ impl<'a> NewClient<'a> {
         self.inner
     }
 }
+    #[cfg(not(target_feature = "avx2"))]
+    pub fn mul() {
+	println!("using non-avx2 multiplication");
+    }
+
+    #[cfg(target_feature = "avx2")]
+    pub fn mul() {
+	println!("using avx2 multiplication");
+    }
 
 #[cfg(test)]
 mod test {
@@ -569,6 +578,7 @@ mod test {
 	params::params_for_scenario
 	//packing::*
     };
+    use std::time::Instant;
 
     #[test]
     fn test_lwe() {
@@ -655,6 +665,31 @@ mod test {
 	
 	
     }
+
+    #[test]
+    fn test_multiply_poly_time() {
+	let mut params = params_for_scenario(1<<30, 1);
+	params.poly_len = 128;
+	params.poly_len_log2 = 7;
+	let dimension = 1024 * 2;
+	let mut exp = PolyMatrixNTT::zero(&params, 1, 1);
+	println!("length: {}", exp.as_slice().len());
+	let mut db = PolyMatrixNTT::zero(&params, dimension, dimension);
+	let mut poly_2 = PolyMatrixRaw::zero(&params, dimension, 1);
+	let mut res_poly = PolyMatrixNTT::zero(&params, dimension, 1);
+	let mut poly_3 = PolyMatrixRaw::zero(&params, 4, dimension);
+	let mut res_poly_2 = PolyMatrixNTT::zero(&params, 4, 1);
+
+	let start = Instant::now();
+	multiply(&mut res_poly, &db, &poly_2.ntt());
+	let mut res_poly_raw = res_poly.raw();
+	multiply(&mut res_poly_2, &poly_3.ntt(), &res_poly_raw.ntt());
+	res_poly_2.raw();
+	let end = Instant::now();
+	println!("time: {:?}", end - start);
+	mul();
+    }
+
     #[test]
     fn test_poly() { // multiply : matrix multiplication
 	let params = params_for_scenario(1<<30, 1);
