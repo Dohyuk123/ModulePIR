@@ -84,7 +84,7 @@ pub fn raw_generate_expansion_params<'a>(
 ) -> Vec<PolyMatrixNTT<'a>> {
     let g_exp = build_gadget(params, 1, m_exp);
     //debug!("using gadget base {}", g_exp.get_poly(0, 1)[0]);
-    //println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
+    println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
     let g_exp_ntt = g_exp.ntt();
     let mut res = Vec::new();
 
@@ -575,10 +575,42 @@ impl<'a> NewClient<'a> {
 mod test {
     use super::*;
     use crate::{
-	params::params_for_scenario
+	params::params_for_scenario, server::*
 	//packing::*
     };
     use std::time::Instant;
+
+    #[test]
+    fn test_mlwe_encryption() {
+	let mut params = params_for_scenario(1 << 30, 1);
+	let mut mlwe_params = params.clone();
+	let mlwe_bit = 7;
+        let mut client = Client::init(&params);
+        client.generate_secret_keys();
+	//params.poly_len_log2 = 3;
+	//params.poly_len = 1<<params.poly_len_log2;
+	mlwe_params.poly_len_log2 = mlwe_bit;
+	mlwe_params.poly_len = 1<<mlwe_bit;
+
+	//println!("{}, {}, {}", params.poly_len_log2, mlwe_params.poly_len_log2, 1<<(params.poly_len_log2 - mlwe_bit));
+
+	let mlwe_dim = 1<<(params.poly_len_log2 - mlwe_bit);
+	//println!("mlwe_dim : {}", mlwe_dim);
+
+	let mut secret = client.get_sk_reg();
+
+	let mut mlwe_secret = PolyMatrixRaw::zero(&mlwe_params, 1, mlwe_dim);
+	let mlwe_sec = rlwe_to_mlwe_b(&params, &secret.as_slice().to_vec(), mlwe_bit);
+	//println!("{}", mlwe_secret.as_slice().len());
+	mlwe_secret.as_mut_slice().copy_from_slice(&mlwe_sec);
+
+	for i in 0..2048 {
+	    assert_eq!(mlwe_secret.data[i], mlwe_sec[i+1]);
+	}
+
+	
+
+    }
 
     #[test]
     fn test_lwe() {
@@ -671,23 +703,74 @@ mod test {
 	let mut params = params_for_scenario(1<<30, 1);
 	params.poly_len = 128;
 	params.poly_len_log2 = 7;
-	let dimension = 1024 * 2;
+	let dimension = 2048;
 	let mut exp = PolyMatrixNTT::zero(&params, 1, 1);
 	println!("length: {}", exp.as_slice().len());
 	let mut db = PolyMatrixNTT::zero(&params, dimension, dimension);
-	let mut poly_2 = PolyMatrixRaw::zero(&params, dimension, 1);
-	let mut res_poly = PolyMatrixNTT::zero(&params, dimension, 1);
-	let mut poly_3 = PolyMatrixRaw::zero(&params, 4, dimension);
-	let mut res_poly_2 = PolyMatrixNTT::zero(&params, 4, 1);
+	let mut query1 = PolyMatrixRaw::zero(&params, dimension, 1); // query 1
+	let mut query2 = PolyMatrixNTT::zero(&params, dimension, 1);
+	let mut res_poly = PolyMatrixNTT::zero(&params, dimension, 1); // result 1
+	let mut poly_3 = PolyMatrixRaw::zero(&params, 4, dimension); // decomped
+	let mut res_poly_2 = PolyMatrixNTT::zero(&params, 4, 1); // result 2
+	let mut query1_ntt = query1.ntt();
+	let mut poly_3_ntt = poly_3.ntt();
 
 	let start = Instant::now();
-	multiply(&mut res_poly, &db, &poly_2.ntt());
-	let mut res_poly_raw = res_poly.raw();
-	multiply(&mut res_poly_2, &poly_3.ntt(), &res_poly_raw.ntt());
-	res_poly_2.raw();
+	multiply(&mut res_poly, &db, &query1_ntt); // db * query 1
+	let mut res_poly_raw = res_poly.raw(); // db*query 1 = dimension by 1
+	multiply(&mut res_poly_2, &poly_3.ntt(), &query2); 
 	let end = Instant::now();
 	println!("time: {:?}", end - start);
 	mul();
+
+	//let mut po1ynomial_1 = PolyMatrixNTT::zero(&params, 1, 1);
+	//let mut polynomial_2 = PolyMatrixNTT::zero(&params, 1, 1);
+	//let mut pol = PolyMatrixNTT::zero(&params, 1, 1);
+
+	//start = Instant::now();
+	//multiply(&mut pol, &polynomial_1, &polynomial_2);
+	//end = Instant::now();
+	//println!("time: {:?}", end - start);
+
+	params.poly_len = 128;
+	params.poly_len_log2 = 7;
+	let mut polyn_1 = PolyMatrixRaw::zero(&params, 1, 1);
+	let mut polyn_2 = PolyMatrixRaw::zero(&params, 1, 1);
+	let mut polyn_1_ntt = polyn_1.ntt();
+	let mut polyn_2_ntt = polyn_2.ntt();
+	let start = Instant::now();
+	for i in 0..16 {
+	    //let mut polyn_1_ntt = polyn_1.ntt();
+	    //let mut polyn_2_ntt = polyn_2.ntt();
+	    let mut polyn_result_ntt = &polyn_1_ntt * &polyn_2_ntt;
+	    //let mut polyn_result = polyn_result_ntt.raw();
+	}	
+	let end = Instant::now();
+
+	let time_ = end - start;
+
+	println!("time: {:?}", (end - start));
+
+	params.poly_len = 2048;
+	params.poly_len_log2 = 11;
+	let mut polyn_1 = PolyMatrixRaw::zero(&params, 1, 1);
+	let mut polyn_2 = PolyMatrixRaw::zero(&params, 1, 1);
+	let mut polyn_1_ntt = polyn_1.ntt();
+//	let mut polyn_2_ntt = polyn_2.ntt();	
+	
+	let start = Instant::now();
+
+	let mut polyn_2_ntt = polyn_2.ntt();
+	let mut polyn_result_ntt = &polyn_1_ntt * &polyn_2_ntt;
+	let mut polyn_result = polyn_result_ntt.raw();
+		
+	let end = Instant::now();
+	//let mut polyn = PolyMatrixNTT::zero(&params, 1, 1);
+	
+	//start = Instant::now();
+	//multiply(&mut polyn, &polyn_1, &polyn_2);
+	//end = Instant::now();
+	println!("time: {:?}", (end - start));
     }
 
     #[test]

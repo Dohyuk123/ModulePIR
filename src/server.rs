@@ -79,6 +79,25 @@ pub fn mlwe_to_mlwe_b(params: &Params, a: &Vec<u64>, mlwe_dim: usize, n: usize) 
     combined_vec
 }
 
+pub fn mlwe_to_mlwe_sk(params: &Params, a: &Vec<u8>, mlwe_dim: usize, n: usize) -> Vec<u8>{
+    let mut combined_vec: Vec<u8> = vec![0; n]; // Allocate memory once
+    let half_mlwe_dim = mlwe_dim / 2;
+
+    for j in 0..n / mlwe_dim {
+       	// Process even_front_odd_back
+        let mut even_front_odd_back: Vec<u8> = (0..half_mlwe_dim)
+	    .map(|k| a[j * mlwe_dim + 2 * k])
+	    .chain ((0..half_mlwe_dim).map(|k| a[j * mlwe_dim + 2 * k + 1]))
+	    .collect();
+	//println!("len: {}", even_front_odd_back.len());
+
+	combined_vec[j * mlwe_dim .. j * mlwe_dim + mlwe_dim].copy_from_slice(&even_front_odd_back);    
+	//println!("{:?}", combined_vec);
+    }
+    combined_vec
+}
+
+// vector to vector
 pub fn rlwe_to_mlwe_a(params: &Params, a: &Vec<u64>, log_pt_byte: usize) -> Vec<u64> {
     let n = 1 << params.poly_len_log2;
     let mut mlwe_vector = mlwe_to_mlwe_a(params, &a, n, n, n);
@@ -89,13 +108,24 @@ pub fn rlwe_to_mlwe_a(params: &Params, a: &Vec<u64>, log_pt_byte: usize) -> Vec<
     mlwe_vector
 }
 
-//params: original params
+
+//params: original params // vector to vector
 pub fn rlwe_to_mlwe_b(params: &Params, a: &Vec<u64>, log_pt_byte: usize) -> Vec<u64> {
     let n = 1 << params.poly_len_log2;
     let mut mlwe_vector = mlwe_to_mlwe_b(params, &a, n, n);
 
     for i in 1..(params.poly_len_log2 - log_pt_byte) {
 	mlwe_vector = mlwe_to_mlwe_b(params, &mlwe_vector, n >> i, n);
+    }
+    mlwe_vector
+}
+
+pub fn rlwe_to_mlwe_sk(params: &Params, a: &Vec<u8>, log_pt_byte: usize) -> Vec<u8> {
+    let n = 1 << params.poly_len_log2;
+    let mut mlwe_vector = mlwe_to_mlwe_sk(params, &a, n, n);
+
+    for i in 1..(params.poly_len_log2 - log_pt_byte) {
+	mlwe_vector = mlwe_to_mlwe_sk(params, &mlwe_vector, n >> i, n);
     }
     mlwe_vector
 }
@@ -1104,6 +1134,7 @@ where
         // Set up some parameters
 
         let params = self.params;
+	println!("params.ptbyte: {}", params.pt_modulus);
         let lwe_params = LWEParams::default();
 
         let db_cols = self.db_cols();
@@ -2681,7 +2712,7 @@ mod test {
     fn test_mlwe_b() {
 	let mut params = get_test_params();
 	let mut mlwe_params = params.clone();
-	let mlwe_bit = 2;
+	let mlwe_bit = 1;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
 	params.poly_len_log2 = 3;
@@ -2691,7 +2722,7 @@ mod test {
 
 	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
 	for i in 0..params.poly_len{
-	    poly.data[i] = (i+1) as u64;
+	    poly.data[i] = (i) as u64;
 	}
 
 	let mut mlwe = rlwe_to_mlwe_b(&params, &poly.as_slice().to_vec(), mlwe_bit);
@@ -2702,9 +2733,12 @@ mod test {
 	
 	let mut output_poly = PolyMatrixRaw::zero(&params, 1, 1);
 
+	let start = Instant::now();
 	mlwe_to_rlwe_b(&params, &mut output_poly, mlwe_result.get_poly(0, 0), mlwe_bit, 0);
+	let end = Instant::now();
+	println!("time: {:?}", end - start);
 
-	println!("{:?}", output_poly.as_slice());
+	//println!("{:?}", output_poly.as_slice());
 	
 
     }
