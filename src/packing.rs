@@ -135,17 +135,21 @@ fn homomorphic_automorph_b_table<'a>(
     table: &[Vec<usize>],
 ) -> PolyMatrixNTT<'a> {
     let ct_raw = ct.raw();
-    //let ct_auto = automorph_alloc(&ct_raw, t);
+
     let mut ct_auto = PolyMatrixNTT::zero(&params, 1, 1);
     apply_automorph_ntt(&params, &table, &ct, &mut ct_auto, t);
     
-    let w_times_ginv_ct_b = pub_param * &ginv_ct_ntt; // B part * a part decomp
+    let mut w_times_ginv_ct_b = PolyMatrixNTT::zero(params, 1, 1);// = pub_param * &ginv_ct_ntt; // B part * a part decomp
+    
+    multiply_no_reduce(&mut w_times_ginv_ct_b, &pub_param, &ginv_ct_ntt, 0);
 
+    fast_add_into_no_reduce(&mut ct_auto, &w_times_ginv_ct_b);
     //let mut ct_auto_1 = PolyMatrixRaw::zero(params, 1, 1); // b part
     //ct_auto_1.data.as_mut_slice().copy_from_slice(ct_auto.get_poly(0, 0));
     //let ct_auto_1_ntt = ct_auto_1.ntt();
 
-    &ct_auto + &w_times_ginv_ct_b // b + aB
+
+    ct_auto//&ct_auto + &w_times_ginv_ct_b // b + aB
 }
 
 fn homomorphic_automorph_b_slice<'a>(
@@ -326,13 +330,14 @@ pub fn query_expansion_table<'a>(
 	for k in 0..(1<<i) {
 	    let plain_mult = &expansion_table[i];
 
-	    multiply(&mut ct_1_b, &ct_b_vec[k], &plain_mult);
+	    //multiply_no_reduce(&mut ct_1_b, &ct_b_vec[k], &plain_mult, 0); // fail
+	    scalar_multiply_avx(&mut ct_1_b, &ct_b_vec[k], &plain_mult);
 
 	    let mut ct_0_result_b = homomorphic_automorph_b_table(params, (params.poly_len >> i) + 1, t_exp, &ct_b_vec[k], &pub_param[i], &decomp_a_vec[index], &table);
 	    let mut ct_1_result_b = homomorphic_automorph_b_table(params, (params.poly_len >> i) + 1, t_exp, &ct_1_b, &pub_param[i], &decomp_a_vec[index + 1], &table);
 
-	    add_into(&mut ct_0_result_b, &mut ct_b_vec[k]);
-	    add_into(&mut ct_1_result_b, &mut ct_1_b);
+	    fast_add_into(&mut ct_0_result_b, &mut ct_b_vec[k]);
+	    fast_add_into(&mut ct_1_result_b, &mut ct_1_b);
 
 	    ct_b_vec[k] = ct_0_result_b;
 	    ct_b_vec.push(ct_1_result_b);
@@ -2209,8 +2214,8 @@ mod test {
 
     #[test]
     fn test_query_expansion_fn_table(){
-	let pt_byte = 128;
-	let pt_byte_log = 7;
+	let pt_byte = 2048;
+	let pt_byte_log = 11;
 	let mut params = params_for_scenario(1 << 30, 1);
 	params.poly_len = 2048;
 	params.poly_len_log2 = 11;
@@ -2358,8 +2363,8 @@ mod test {
     #[test]
     fn test_query_expansion(){
 
-	let pt_byte = 128;
-	let pt_byte_log = 7;
+	let pt_byte = 2048;
+	let pt_byte_log = 11;
 	let params = params_for_scenario(1 << 30, 1);
 	let mut client = Client::init(&params);
 	client.generate_secret_keys(); //generate secret key
