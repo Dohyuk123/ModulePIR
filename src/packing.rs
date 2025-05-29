@@ -134,22 +134,18 @@ fn homomorphic_automorph_b_table<'a>(
     ginv_ct_ntt: &PolyMatrixNTT<'a>, // decomp_a
     table: &[Vec<usize>],
 ) -> PolyMatrixNTT<'a> {
-    let ct_raw = ct.raw();
 
     let mut ct_auto = PolyMatrixNTT::zero(&params, 1, 1);
     apply_automorph_ntt(&params, &table, &ct, &mut ct_auto, t);
     
     let mut w_times_ginv_ct_b = PolyMatrixNTT::zero(params, 1, 1);// = pub_param * &ginv_ct_ntt; // B part * a part decomp
-    
+    //println!("{} {} {} {} {} {}", params.crt_count, params.poly_len, pub_param.get_rows(), pub_param.get_cols(), ginv_ct_ntt.get_rows(), ginv_ct_ntt.get_cols());
+    //fast_multiply_no_reduce(params, &mut w_times_ginv_ct_b, &pub_param, &ginv_ct_ntt, 0);
     multiply_no_reduce(&mut w_times_ginv_ct_b, &pub_param, &ginv_ct_ntt, 0);
-
+    
     fast_add_into_no_reduce(&mut ct_auto, &w_times_ginv_ct_b);
-    //let mut ct_auto_1 = PolyMatrixRaw::zero(params, 1, 1); // b part
-    //ct_auto_1.data.as_mut_slice().copy_from_slice(ct_auto.get_poly(0, 0));
-    //let ct_auto_1_ntt = ct_auto_1.ntt();
 
-
-    ct_auto//&ct_auto + &w_times_ginv_ct_b // b + aB
+    ct_auto
 }
 
 fn homomorphic_automorph_b_slice<'a>(
@@ -314,16 +310,15 @@ pub fn query_expansion_table<'a>(
     params: &'a Params,
     pt_byte_log: usize,
     t_exp: usize,
-    ct_b: PolyMatrixNTT<'a>,
+    //ct_b: PolyMatrixNTT<'a>,
     pub_param: &[PolyMatrixNTT<'a>],
     decomp_a_vec: &[PolyMatrixNTT<'a>],
     table: &[Vec<usize>],
     expansion_table: &[PolyMatrixNTT<'a>],
-) -> Vec<PolyMatrixNTT<'a>> {
+    ct_b_vec: &mut Vec<PolyMatrixNTT<'a>>, // input
+){
 
     let mut ct_1_b = PolyMatrixNTT::zero(&params, 1, 1);
-    let mut ct_b_vec = Vec::new();
-    ct_b_vec.push(ct_b);
 
     let mut index = 0;
     for i in 0..pt_byte_log {
@@ -340,12 +335,13 @@ pub fn query_expansion_table<'a>(
 	    fast_add_into(&mut ct_1_result_b, &mut ct_1_b);
 
 	    ct_b_vec[k] = ct_0_result_b;
-	    ct_b_vec.push(ct_1_result_b);
+	    //ct_b_vec.push(ct_1_result_b);
+	    ct_b_vec[k+(1<<i)] = ct_1_result_b;
 	    index = index + 2;
 	}
     }
     
-    ct_b_vec
+    //ct_b_vec
 }
 
 pub fn query_expansion_slice<'a>(
@@ -744,6 +740,7 @@ pub fn precompute_pack<'a>(
                 // let ginv_ct_ntt = ginv_ct.ntt();
                 // let w_times_ginv_ct = pub_param * &ginv_ct_ntt;
                 w_times_ginv_ct.as_mut_slice().fill(0);
+		//println!("{}, {}, {}, {}", pub_param.get_rows(), pub_param.get_cols(), cur_ginv_ct_ntt.get_rows(), cur_ginv_ct_ntt.get_cols());
                 multiply_no_reduce(&mut w_times_ginv_ct, &pub_param, &cur_ginv_ct_ntt, 0);
 
                 // &ct_auto_1_ntt.pad_top(1) + &w_times_ginv_ct
@@ -849,6 +846,7 @@ pub fn pack_using_precomp_vals<'a>(
             // let w_times_ginv_ct = &w * cur_ginv_ct_ntt;
             // multiply(&mut w_times_ginv_ct, &w, &cur_ginv_ct_ntt);
             // w_times_ginv_ct.as_mut_slice().fill(0);
+	    //println!("{}, {}, {}, {}", w.get_rows(), w.get_cols(), cur_ginv_ct_ntt.get_rows(), cur_ginv_ct_ntt.get_cols());
             fast_multiply_no_reduce(params, &mut w_times_ginv_ct, &w, &cur_ginv_ct_ntt, 0);
             num_muls += 1;
             time_2 += now.elapsed().as_micros();
@@ -2168,12 +2166,6 @@ mod test {
 	    ntt_forward(&params, pol_dst);
 	}
 
-	//for i in 1..t_exp{
-	//    let pol_src = g_inv_b.get_poly(i, 0);
-	//    let pol_dst = g_inv_b_ntt.get_poly_mut(i, 0);
-	//    reduce_copy(&params, pol_dst, pol_src);
-	//    ntt_forward(&params, pol_dst);
-	//}
 	to_ntt(&mut g_inv_a_ntt, &g_inv_a);
 	to_ntt(&mut g_inv_b_ntt, &g_inv_b);
 
@@ -2214,16 +2206,20 @@ mod test {
 
     #[test]
     fn test_query_expansion_fn_table(){
-	let pt_byte = 2048;
-	let pt_byte_log = 11;
+	let pt_byte = 128;
+	let pt_byte_log = 7;
 	let mut params = params_for_scenario(1 << 30, 1);
 	params.poly_len = 2048;
 	params.poly_len_log2 = 11;
 	let mut client = Client::init(&params);
 	client.generate_secret_keys(); //generate secret key
 
-	let table = generate_automorph_tables_brute_force(&params); // create table
-	let expansion_table = create_expansion_table(&params, pt_byte_log);
+	let mut ct_b_vec = vec![PolyMatrixNTT::zero(&params, 1, 1); 1<<pt_byte_log]; // this will be the result
+    
+        //ct_b_vec[0] = ct_b;
+
+	let table = generate_automorph_tables_brute_force(&params); // create automorphism table table
+	let expansion_table = create_expansion_table(&params, pt_byte_log); // create expansion table
 
 	let t_exp = params.t_exp_left;
 	let pack_seed = [1u8; 32];
@@ -2256,7 +2252,8 @@ mod test {
 	//let end = Instant::now();
 
 	let start = Instant::now();	
-	let mut ct_b_vec = query_expansion_table(&params, pt_byte_log, t_exp, ct_b, &pub_params_b, &decomp_a_vec, &table, &expansion_table);
+	ct_b_vec[0] = ct_b;
+	query_expansion_table(&params, pt_byte_log, t_exp, &pub_params_b, &decomp_a_vec, &table, &expansion_table, &mut ct_b_vec);
 	let end = Instant::now();
 
 	for i in 0..ct_a_vec.len(){
@@ -2282,8 +2279,8 @@ mod test {
 
     #[test]
     fn test_query_expansion_fn(){
-	let pt_byte = 128;
-	let pt_byte_log = 7;
+	let pt_byte = 2048;
+	let pt_byte_log = 11;
 	let mut params = params_for_scenario(1 << 30, 1);
 	params.poly_len = 2048;
 	params.poly_len_log2 = 11;
