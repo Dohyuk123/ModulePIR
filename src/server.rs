@@ -2738,7 +2738,7 @@ mod test {
 	let end = Instant::now();
 	println!("time: {:?}", end - start);
 
-	//println!("{:?}", output_poly.as_slice());
+	println!("{:?}", output_poly.as_slice());
 	
 
     }

@@ -4,13 +4,37 @@ use rand_chacha::ChaCha20Rng;
 
 use spiral_rs::aligned_memory::AlignedMemory64;
 use spiral_rs::{
-    arith::*, client::*, discrete_gaussian::*, gadget::*, number_theory::*, params::*, poly::*,
+    arith::*, client::*, discrete_gaussian::*, gadget::*, number_theory::*, params::*, poly::*
 };
-//use crate::server::Precomp;
+use crate::server::Precomp;
 
-//use super::util::*;
+use super::util::*;
 use super::convolution::negacyclic_matrix_u32;
-use super::{lwe::*, noise_analysis::measure_noise_width_squared, scheme::*, util::*};
+use super::{lwe::*, noise_analysis::measure_noise_width_squared, scheme::*, util::*, server::*};
+
+pub fn mlwe_to_mlwe_b_combined<'a>(params: &'a Params, a: &mut Vec<u64>, pt_byte:usize) -> Vec<u64> {
+    let mut k = 0;
+    let mut new_vec: Vec<u64> = vec![0;params.poly_len];
+
+    while k < params.poly_len {
+	for i in 0..pt_byte {
+	    let idx = k+i;
+	    new_vec[2*i + k] = a[idx];
+	    new_vec[2*i+1 + k] = a[pt_byte + idx];
+	}
+	k = k + 2*pt_byte;
+    }
+    new_vec
+}
+
+pub fn mlwe_to_rlwe_b_combined<'a>(params: &'a Params, mut vector: Vec<u64>, pt_byte : usize) -> Vec<u64>{
+    let mut i = pt_byte;
+    while i<=params.poly_len / 2 {
+	vector = mlwe_to_mlwe_b_combined(&params, &mut vector, i);
+	i = i*2;
+    }
+    vector
+}
 
 pub fn rlwe_to_lwe<'a>(params: &'a Params, ct: &PolyMatrixRaw<'a>) -> Vec<u64> {
     let a = ct.get_poly(0, 0);
@@ -100,6 +124,34 @@ pub fn raw_generate_expansion_params<'a>(
     }
 
     res
+}
+
+pub fn decrypt_mlwe<'a> ( 
+    params: &'a Params,
+    mlwe_params: &'a Params,
+    ct_a: &PolyMatrixNTT<'a>,
+    ct_b: &PolyMatrixNTT<'a>,
+    client: &Client<'a>,
+) ->PolyMatrixRaw<'a> {
+    //let pt_byte = 1<<pt_byte_log2;
+    //let scale_k = params.modulus / params.pt_modulus;
+
+    let mut mlwe_secret = rlwe_to_mlwe_b(&params, &client.get_sk_reg().as_slice().to_vec(), mlwe_params.poly_len_log2);
+    let mut secret = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, 1);
+
+    secret.as_mut_slice().copy_from_slice(&mlwe_secret);
+    let ct_as = ct_a * &secret.ntt();
+    let b = ct_b + &ct_as;
+    let mut dec_mlwe = PolyMatrixRaw::zero(&mlwe_params, b.rows, b.cols);
+    let b_raw = b.raw();
+
+    //println!("result ct : {:?}", b_raw.as_slice());
+    
+    for z in 0..dec_mlwe.data.len() {
+	dec_mlwe.data[z] = rescale(b_raw.data[z], params.modulus, params.pt_modulus);
+    }
+
+    dec_mlwe
 }
 
 pub fn decrypt_ct_reg_measured<'a>(
@@ -716,8 +768,11 @@ mod test {
 	let mut poly_3_ntt = poly_3.ntt();
 
 	let start = Instant::now();
+	//let mut query1_ntt = query1.ntt();
 	multiply(&mut res_poly, &db, &query1_ntt); // db * query 1
 	let mut res_poly_raw = res_poly.raw(); // db*query 1 = dimension by 1
+	//let mut query2_ntt = query2.raw();
+	//query2 = query2_ntt.ntt();
 	multiply(&mut res_poly_2, &poly_3.ntt(), &query2); 
 	let end = Instant::now();
 	println!("time: {:?}", end - start);
@@ -852,5 +907,22 @@ mod test {
 	
 	println!("0th: {:?}", poly_0.as_slice());
 	println!("1st: {:?}", poly_00.as_slice());
+    }
+    #[test]
+    fn test_mlwe_to_rlwe_b(){
+	let pt_byte = 128;
+	let pt_byte_log2 = 7;
+	let params = params_for_scenario(1<<30, 1);
+	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
+
+	for i in 0..params.poly_len {
+	    poly.data[i] = (i) as u64;
+	}
+	
+	let mut mlwe = rlwe_to_mlwe_b(&params, &poly.as_slice().to_vec(), pt_byte_log2);
+	println!("mlwe: {:?}", mlwe);
+
+	mlwe = mlwe_to_rlwe_b_combined(&params, mlwe, pt_byte);
+	println!("mlwe: {:?}", mlwe);
     }
 }

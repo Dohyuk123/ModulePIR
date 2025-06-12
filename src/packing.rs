@@ -125,6 +125,7 @@ fn homomorphic_automorph_b<'a>(
     &ct_auto.ntt() + &w_times_ginv_ct_b // b + aB
 }
 
+
 fn homomorphic_automorph_b_table<'a>(
     params: &'a Params,
     t: usize,
@@ -140,6 +141,9 @@ fn homomorphic_automorph_b_table<'a>(
     
     let mut w_times_ginv_ct_b = PolyMatrixNTT::zero(params, 1, 1);// = pub_param * &ginv_ct_ntt; // B part * a part decomp
     //println!("{} {} {} {} {} {}", params.crt_count, params.poly_len, pub_param.get_rows(), pub_param.get_cols(), ginv_ct_ntt.get_rows(), ginv_ct_ntt.get_cols());
+
+    //let mut res = condense_matrix(params, &ginv_ct_ntt);
+
     //fast_multiply_no_reduce(params, &mut w_times_ginv_ct_b, &pub_param, &ginv_ct_ntt, 0);
     multiply_no_reduce(&mut w_times_ginv_ct_b, &pub_param, &ginv_ct_ntt, 0);
     
@@ -2206,8 +2210,8 @@ mod test {
 
     #[test]
     fn test_query_expansion_fn_table(){
-	let pt_byte = 128;
-	let pt_byte_log = 7;
+	let pt_byte = 2048;
+	let pt_byte_log = 11;
 	let mut params = params_for_scenario(1 << 30, 1);
 	params.poly_len = 2048;
 	params.poly_len_log2 = 11;
@@ -2448,6 +2452,48 @@ mod test {
 
 	println!("expansion time : {:?}", end - start);
 
+
+    }
+
+    #[test]
+    fn test_mlwe_decryption_fn(){
+	let pt_byte = 128;
+	let pt_byte_log2 = 7;
+	let params = params_for_scenario(1<<30, 1);
+	let mut mlwe_params = params.clone();
+	let mut client = Client::init(&params);
+	client.generate_secret_keys();
+	
+	let pack_seed = [1u8; 32];
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+	let scale_k = params.modulus / params.pt_modulus;
+
+	mlwe_params.poly_len_log2 = pt_byte_log2;
+	mlwe_params.poly_len = 1<<pt_byte_log2;
+	
+	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
+	for i in 0..2048 {
+	    poly.data[i] = (i as u64) * scale_k;
+	}
+	//println!("poly: {:?}", poly.as_slice());
+	
+	let ct = client.encrypt_matrix_reg(&poly.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub);	
+	
+	let mut ct_a = ct.submatrix(0, 0, 1, 1);
+	let mut ct_b = ct.submatrix(1, 0, 1, 1);
+
+	let mut ct_mlwe_poly_a = rlwe_to_mlwe_a(&params, &ct_a.raw().as_slice().to_vec(), mlwe_params.poly_len_log2);
+	let mut ct_mlwe_poly_b = rlwe_to_mlwe_b(&params, &ct_b.raw().as_slice().to_vec(), mlwe_params.poly_len_log2);
+
+	let mut ct_mlwe_a = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, params.poly_len / mlwe_params.poly_len);
+	let mut ct_mlwe_b = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, 1);
+
+	ct_mlwe_a.as_mut_slice().copy_from_slice(&ct_mlwe_poly_a);
+	ct_mlwe_b.as_mut_slice().copy_from_slice(&ct_mlwe_poly_b);
+
+	let mut dec = decrypt_mlwe(&params, &mlwe_params, &ct_mlwe_a.ntt(), &ct_mlwe_b.ntt(), &client);
+
+	println!("result ct : {:?}", dec.as_slice());
 
     }
 
