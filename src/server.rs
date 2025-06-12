@@ -79,24 +79,6 @@ pub fn mlwe_to_mlwe_b(params: &Params, a: &Vec<u64>, mlwe_dim: usize, n: usize) 
     combined_vec
 }
 
-pub fn mlwe_to_mlwe_sk(params: &Params, a: &Vec<u8>, mlwe_dim: usize, n: usize) -> Vec<u8>{
-    let mut combined_vec: Vec<u8> = vec![0; n]; // Allocate memory once
-    let half_mlwe_dim = mlwe_dim / 2;
-
-    for j in 0..n / mlwe_dim {
-       	// Process even_front_odd_back
-        let mut even_front_odd_back: Vec<u8> = (0..half_mlwe_dim)
-	    .map(|k| a[j * mlwe_dim + 2 * k])
-	    .chain ((0..half_mlwe_dim).map(|k| a[j * mlwe_dim + 2 * k + 1]))
-	    .collect();
-	//println!("len: {}", even_front_odd_back.len());
-
-	combined_vec[j * mlwe_dim .. j * mlwe_dim + mlwe_dim].copy_from_slice(&even_front_odd_back);    
-	//println!("{:?}", combined_vec);
-    }
-    combined_vec
-}
-
 // vector to vector
 pub fn rlwe_to_mlwe_a(params: &Params, a: &Vec<u64>, log_pt_byte: usize) -> Vec<u64> {
     let n = 1 << params.poly_len_log2;
@@ -116,16 +98,6 @@ pub fn rlwe_to_mlwe_b(params: &Params, a: &Vec<u64>, log_pt_byte: usize) -> Vec<
 
     for i in 1..(params.poly_len_log2 - log_pt_byte) {
 	mlwe_vector = mlwe_to_mlwe_b(params, &mlwe_vector, n >> i, n);
-    }
-    mlwe_vector
-}
-
-pub fn rlwe_to_mlwe_sk(params: &Params, a: &Vec<u8>, log_pt_byte: usize) -> Vec<u8> {
-    let n = 1 << params.poly_len_log2;
-    let mut mlwe_vector = mlwe_to_mlwe_sk(params, &a, n, n);
-
-    for i in 1..(params.poly_len_log2 - log_pt_byte) {
-	mlwe_vector = mlwe_to_mlwe_sk(params, &mlwe_vector, n >> i, n);
     }
     mlwe_vector
 }

@@ -12,6 +12,34 @@ use super::util::*;
 use super::convolution::negacyclic_matrix_u32;
 use super::{lwe::*, noise_analysis::measure_noise_width_squared, scheme::*, util::*, server::*};
 
+pub fn mlwe_to_mlwe_sk(params: &Params, a: &Vec<u8>, mlwe_dim: usize, n: usize) -> Vec<u8>{
+    let mut combined_vec: Vec<u8> = vec![0; n]; // Allocate memory once
+    let half_mlwe_dim = mlwe_dim / 2;
+
+    for j in 0..n / mlwe_dim {
+       	// Process even_front_odd_back
+        let mut even_front_odd_back: Vec<u8> = (0..half_mlwe_dim)
+	    .map(|k| a[j * mlwe_dim + 2 * k])
+	    .chain ((0..half_mlwe_dim).map(|k| a[j * mlwe_dim + 2 * k + 1]))
+	    .collect();
+	//println!("len: {}", even_front_odd_back.len());
+
+	combined_vec[j * mlwe_dim .. j * mlwe_dim + mlwe_dim].copy_from_slice(&even_front_odd_back);    
+	//println!("{:?}", combined_vec);
+    }
+    combined_vec
+}
+
+pub fn rlwe_to_mlwe_sk(params: &Params, a: &Vec<u8>, log_pt_byte: usize) -> Vec<u8> {
+    let n = 1 << params.poly_len_log2;
+    let mut mlwe_vector = mlwe_to_mlwe_sk(params, &a, n, n);
+
+    for i in 1..(params.poly_len_log2 - log_pt_byte) {
+	mlwe_vector = mlwe_to_mlwe_sk(params, &mlwe_vector, n >> i, n);
+    }
+    mlwe_vector
+}
+
 pub fn mlwe_to_mlwe_b_combined<'a>(params: &'a Params, a: &mut Vec<u64>, pt_byte:usize) -> Vec<u64> {
     let mut k = 0;
     let mut new_vec: Vec<u64> = vec![0;params.poly_len];
@@ -27,8 +55,8 @@ pub fn mlwe_to_mlwe_b_combined<'a>(params: &'a Params, a: &mut Vec<u64>, pt_byte
     new_vec
 }
 
-pub fn mlwe_to_rlwe_b_combined<'a>(params: &'a Params, mut vector: Vec<u64>, pt_byte : usize) -> Vec<u64>{
-    let mut i = pt_byte;
+pub fn mlwe_to_rlwe_b_combined<'a>(params: &'a Params, mut vector: Vec<u64>, pt_byte_log2 : usize) -> Vec<u64>{
+    let mut i = 1<<pt_byte_log2;
     while i<=params.poly_len / 2 {
 	vector = mlwe_to_mlwe_b_combined(&params, &mut vector, i);
 	i = i*2;
@@ -108,7 +136,7 @@ pub fn raw_generate_expansion_params<'a>(
 ) -> Vec<PolyMatrixNTT<'a>> {
     let g_exp = build_gadget(params, 1, m_exp);
     //debug!("using gadget base {}", g_exp.get_poly(0, 1)[0]);
-    println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
+    //println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
     let g_exp_ntt = g_exp.ntt();
     let mut res = Vec::new();
 
@@ -123,6 +151,40 @@ pub fn raw_generate_expansion_params<'a>(
         res.push(w_exp_i);
     }
 
+    res
+}
+
+pub fn generate_query_expansion_key<'a>(
+    params: &'a Params,
+    mlwe_params: &'a Params,
+    sk_reg: &PolyMatrixRaw<'a>, // mlwe sk_reg
+    pt_byte_log2: usize,
+    m_exp: usize,
+    rng: &mut ChaCha20Rng,
+    rng_pub: &mut ChaCha20Rng,
+) -> Vec<PolyMatrixNTT<'a>> {
+    let g_exp = build_gadget(params, 1, m_exp);
+    let g_exp_ntt = g_exp.ntt();
+    let mut res = Vec::new();
+    let pt_byte = 1<<pt_byte_log2;
+
+    for i in 0..pt_byte_log2 {
+	let t = (mlwe_params.poly_len / (1<<i)) + 1;
+	let tau_sk_reg = automorph_alloc(&sk_reg, t);
+	let prod = &tau_sk_reg.ntt() * &g_exp_ntt; // automorph secret key
+
+	for j in 0..m_exp {
+	    let prod_sub = prod.submatrix(0, j, pt_byte, 1); //take one line
+	    let auto_sk_rlwe = rlwe_to_mlwe_b(&params, &prod_sub.as_slice().to_vec(), pt_byte_log2); // combine sks -> rlwe
+	    let mut auto_sk_rlwe_poly = PolyMatrixRaw::zero(&params, 1, 1); 
+	    auto_sk_rlwe_poly.as_mut_slice().copy_from_slice(&auto_sk_rlwe); // take combined to polynomial
+	    let mut auto_sk_rlwe_poly_ntt = auto_sk_rlwe_poly.ntt();
+	    
+	    let sample = get_fresh_reg_public_key(params, &sk_reg, m_exp, rng, rng_pub); // encrypt it
+	    let w_exp_i = &sample + &auto_sk_rlwe_poly_ntt.pad_top(1);
+	    res.push(w_exp_i);
+	}
+    }
     res
 }
 
@@ -922,7 +984,7 @@ mod test {
 	let mut mlwe = rlwe_to_mlwe_b(&params, &poly.as_slice().to_vec(), pt_byte_log2);
 	println!("mlwe: {:?}", mlwe);
 
-	mlwe = mlwe_to_rlwe_b_combined(&params, mlwe, pt_byte);
+	mlwe = mlwe_to_rlwe_b_combined(&params, mlwe, pt_byte_log2);
 	println!("mlwe: {:?}", mlwe);
     }
 }
