@@ -1585,6 +1585,15 @@ mod test {
             &mut ChaCha20Rng::from_seed(pack_seed),
         );
 
+	let dec = client.decrypt_matrix_reg(&pack_pub_params[0].submatrix(0, 1, 2, 1));
+	let mut dec_raw = dec.raw();
+	//let mut rescaled = PolyMatrixRaw::zero(&params, 1, 1);
+	//for i in 0..params.poly_len{
+	    //dec_raw.data[i] = rescale(dec_raw.data[i], params.modulus, params.pt_modulus);
+	//}
+	println!("rescaled: {:?}", &dec_raw.as_slice()[..50]);
+
+
         // generate poly_len ciphertexts
         let mut v_ct = Vec::new();
         let mut b_values = Vec::new();
@@ -1815,35 +1824,44 @@ mod test {
     #[test]
     fn test_automorph_tables() {
         let params = params_for_scenario(1 << 30, 1);
+	let mut mlwe_params = params.clone();
+	mlwe_params.poly_len = 256;
+	mlwe_params.poly_len_log2 = 8;
 
         let now = Instant::now();
-        let tables = generate_automorph_tables_brute_force(&params);
+        let tables = generate_automorph_tables_brute_force(&mlwe_params);
         println!("Generating tables took {} us", now.elapsed().as_micros());
 
         let mut rng = ChaCha20Rng::from_seed([7u8; 32]);
 
-        for t in ([3, 9, 17, 33, 65, 129, 257, 513, 1025, 2049])
+        for t in ([3, 9, 17, 33, 65, 129])//, 257, 513, 1025, 2049])
             .into_iter()
             .rev()
         {
-            let poly = PolyMatrixRaw::random_rng(&params, 1, 1, &mut rng);
+            let mut poly = PolyMatrixRaw::random_rng(&mlwe_params, 1, 1, &mut rng);
+
+	    for i in 0..mlwe_params.poly_len {
+		poly.data[i] = i as u64;
+	    }	
+	
             let poly_ntt = poly.ntt();
 
             let poly_auto = automorph_alloc(&poly, t);
             let poly_auto_ntt = poly_auto.ntt();
-            let mut poly_auto_ntt_using_tables = PolyMatrixNTT::zero(&params, 1, 1);
+            let mut poly_auto_ntt_using_tables = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
             apply_automorph_ntt(
-                &params,
+                &mlwe_params,
                 &tables,
                 &poly_ntt,
                 &mut poly_auto_ntt_using_tables,
                 t,
             );
 
-            println!("poly_ntt: {:?}", &poly_ntt.as_slice()[..30]);
+	    println!("t: {}", t);
+            println!("poly_ntt: {:?}", &poly_auto_ntt.raw().as_slice()[0..30]);
             println!(
                 "poly_auto_ntt_using_tables: {:?}",
-                &poly_auto_ntt_using_tables.as_slice()[..30]
+                &poly_auto_ntt_using_tables.raw().as_slice()[0..30]
             );
 
             assert_eq!(
@@ -1852,6 +1870,7 @@ mod test {
                 "t: {}",
                 t
             );
+	    //println!("hi");
         }
     }
 
