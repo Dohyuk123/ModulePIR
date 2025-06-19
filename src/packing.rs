@@ -2690,7 +2690,7 @@ mod test {
 
 	let ct = client.encrypt_matrix_reg(&poly.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); // ciphertext
 
-	//let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(
+	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut client);
 
 	let mut ct_a = ct.submatrix(0, 0, 1, 1);
 	let mut ct_b = ct.submatrix(1, 0, 1, 1);
@@ -2704,5 +2704,6 @@ mod test {
 	mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a);
 	mlwe_b_poly.as_mut_slice().copy_from_slice(&mlwe_b);
 
+	let (decomp_a, auto_a) = mlwe_automorph_a(&params, &mlwe_params, 129, dimension, t_exp, &mlwe_a_poly.ntt(), &expansion_key_a[0], &tables);
     }
 }
