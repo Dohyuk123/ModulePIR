@@ -9,7 +9,6 @@ use crate::server::Precomp;
 use super::util::*;
 
 fn mlwe_automorph_a<'a>(
-    params: &'a Params,
     mlwe_params: &'a Params,
     t: usize,
     dimension: usize,
@@ -19,15 +18,11 @@ fn mlwe_automorph_a<'a>(
     table: &[Vec<usize>],
 ) -> (PolyMatrixNTT<'a>, PolyMatrixNTT<'a>) { // decomp_a, result ciphertext
 
-    //let mut decomp = Vec::new();
-    //let mut 
+    let mut ct_auto = PolyMatrixNTT::zero(mlwe_params, 1, dimension);   
+    apply_automorph_ntt(mlwe_params, &table, &ct_a, &mut ct_auto, t);
 
-    let mut ct_auto = PolyMatrixNTT::zero(&mlwe_params, 1, dimension);
-    apply_automorph_ntt(&params, &table, &ct_a, &mut ct_auto, t);
-
-    let mut ct_auto_raw = ct_auto.raw();
     let mut ct_auto_raw_transpose = PolyMatrixRaw::zero(&mlwe_params, dimension, 1);
-    ct_auto_raw_transpose.as_mut_slice().copy_from_slice(&ct_auto_raw.as_slice());
+    ct_auto_raw_transpose.as_mut_slice().copy_from_slice(&ct_auto.raw().as_slice());
  
     let mut g_inv_a = PolyMatrixRaw::zero(&mlwe_params, t_exp * dimension, 1);
     gadget_invert_rdim(&mut g_inv_a, &ct_auto_raw_transpose, dimension);
@@ -37,10 +32,31 @@ fn mlwe_automorph_a<'a>(
 
     let g_inv_a_ntt = g_inv_a_transpose.ntt(); // what we want
     
-    let result_a = &g_inv_a_ntt * &pub_param; 
+    let result_a = &g_inv_a_ntt * pub_param; 
 
     (g_inv_a_ntt, result_a)
 
+}
+
+fn mlwe_automorph_b<'a>(
+    mlwe_params: &'a Params,
+    t: usize,
+    dimension : usize,
+    t_exp: usize,
+    ct_b: &PolyMatrixNTT<'a>,
+    decomp_a: &PolyMatrixNTT<'a>,
+    pub_param: &PolyMatrixNTT<'a>,
+    table: &[Vec<usize>],
+) -> PolyMatrixNTT<'a> {
+
+    let mut ct_auto = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
+    apply_automorph_ntt(&mlwe_params, &table, &ct_b, &mut ct_auto, t);
+
+    let key_switch_b = decomp_a * pub_param;
+
+    let result_b = &ct_auto + &key_switch_b;
+
+    result_b
 }
 
 fn homomorphic_automorph<'a>(
@@ -2668,8 +2684,8 @@ mod test {
 	let pt_byte_log2 = 7;
 	let params = params_for_scenario(1<<30, 1);
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len = 1<<pt_byte_log2;
-	mlwe_params.poly_len_log2 = pt_byte_log2;
+	mlwe_params.poly_len = 128;
+	mlwe_params.poly_len_log2 = 7;
 	let mut client = Client::init(&params);
 	client.generate_secret_keys();
 
@@ -2698,12 +2714,22 @@ mod test {
 	let mlwe_a = rlwe_to_mlwe_a(&params, &ct_a.raw().as_slice().to_vec(), pt_byte_log2);
 	let mlwe_b = rlwe_to_mlwe_b(&params, &ct_b.raw().as_slice().to_vec(), pt_byte_log2);
 
-	let mut mlwe_a_poly = PolyMatrixRaw::zero(&mlwe_params, dimension, dimension);
-	let mut mlwe_b_poly = PolyMatrixRaw::zero(&mlwe_params, dimension, 1);
+	let mut mlwe_a_poly = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
+	let mut mlwe_b_poly = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
 
-	mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a);
-	mlwe_b_poly.as_mut_slice().copy_from_slice(&mlwe_b);
+	mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a[0..(mlwe_params.poly_len * dimension)]);
+	mlwe_b_poly.as_mut_slice().copy_from_slice(&mlwe_b[0..mlwe_params.poly_len]);
+	let mut dec = decrypt_mlwe(&params, &mlwe_params, &mlwe_a_poly.ntt(), &mlwe_b_poly.ntt(), &client);
 
-	let (decomp_a, auto_a) = mlwe_automorph_a(&params, &mlwe_params, 129, dimension, t_exp, &mlwe_a_poly.ntt(), &expansion_key_a[0], &tables);
+	println!("dec: {:?}", dec.as_slice());
+	
+	let mlwe_a_poly_ntt = mlwe_a_poly.ntt();
+
+	let (decomp_a, auto_a) = mlwe_automorph_a(&mlwe_params, 129, dimension, t_exp, &mlwe_a_poly.ntt(), &expansion_key_a[0], &tables);
+
+	let auto_b = mlwe_automorph_b(&mlwe_params, 129, dimension, t_exp, &mlwe_b_poly.ntt(), &decomp_a, &expansion_key_b[0], &tables);
+
+	let mut dec_res = decrypt_mlwe(&params, &mlwe_params, &auto_a, &auto_b, &client);
+	println!("dec res : {:?}", dec_res.as_slice());
     }
 }
