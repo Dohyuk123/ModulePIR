@@ -158,13 +158,16 @@ pub fn raw_generate_expansion_params<'a>(
 pub fn generate_query_expansion_key<'a>(
     params: &'a Params,
     mlwe_params: &'a Params,
-    sk_reg: &PolyMatrixRaw<'a>, // mlwe sk_reg
-    pt_byte_log2: usize,
     m_exp: usize,
     rng: &mut ChaCha20Rng,
     rng_pub: &mut ChaCha20Rng,
     client: &mut Client<'a>,
 ) -> (Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>) {
+
+    let pt_byte_log2 = mlwe_params.poly_len_log2;
+    let mut mlwe_secret_tmp = rlwe_to_mlwe_b(&params, &client.get_sk_reg().as_slice().to_vec(), mlwe_params.poly_len_log2);
+    let mut sk_reg = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, 1);
+    sk_reg.as_mut_slice().copy_from_slice(&mlwe_secret_tmp);
 
     let g_exp = build_gadget(params, 1, m_exp);
     let g_exp_ntt = g_exp.ntt();
@@ -212,6 +215,7 @@ pub fn generate_query_expansion_key<'a>(
     }
     (res_a, res_b)
 }
+
 
 
 
@@ -1064,11 +1068,11 @@ mod test {
 
 	let scale_k = params.modulus / params.pt_modulus; 
 	
-	let mut mlwe_secret = rlwe_to_mlwe_b(&params, &client.get_sk_reg().as_slice().to_vec(), pt_byte_log2);
+	//let mut mlwe_secret = rlwe_to_mlwe_b(&params, &client.get_sk_reg().as_slice().to_vec(), pt_byte_log2);
 
-	let mut mlwe_secret_poly = PolyMatrixRaw::zero(&mlwe_params, dimension, 1); // mlwe secret key
+	//let mut mlwe_secret_poly = PolyMatrixRaw::zero(&mlwe_params, dimension, 1); // mlwe secret key
 
-	mlwe_secret_poly.as_mut_slice().copy_from_slice(&mlwe_secret);
+	//mlwe_secret_poly.as_mut_slice().copy_from_slice(&mlwe_secret);
 
 	let t_exp = params.t_exp_left;
 	let pack_seed = [1u8; 32];
@@ -1081,7 +1085,7 @@ mod test {
 	
 	let ct = client.encrypt_matrix_reg(&poly.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); // encrypt plaintext
 
-	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params,  &mlwe_secret_poly, pt_byte_log2, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut client);
+	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut client);
 
 	let mut ct_a = ct.submatrix(0, 0, 1, 1); // a part
 	let mut ct_b = ct.submatrix(1, 0, 1, 1); // b part

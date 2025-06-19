@@ -8,6 +8,41 @@ use crate::server::Precomp;
 
 use super::util::*;
 
+fn mlwe_automorph_a<'a>(
+    params: &'a Params,
+    mlwe_params: &'a Params,
+    t: usize,
+    dimension: usize,
+    t_exp: usize,
+    ct_a: &PolyMatrixNTT<'a>, // 1 by dimension
+    pub_param: &PolyMatrixNTT<'a>, // 16 by 48
+    table: &[Vec<usize>],
+) -> (PolyMatrixNTT<'a>, PolyMatrixNTT<'a>) { // decomp_a, result ciphertext
+
+    //let mut decomp = Vec::new();
+    //let mut 
+
+    let mut ct_auto = PolyMatrixNTT::zero(&mlwe_params, 1, dimension);
+    apply_automorph_ntt(&params, &table, &ct_a, &mut ct_auto, t);
+
+    let mut ct_auto_raw = ct_auto.raw();
+    let mut ct_auto_raw_transpose = PolyMatrixRaw::zero(&mlwe_params, dimension, 1);
+    ct_auto_raw_transpose.as_mut_slice().copy_from_slice(&ct_auto_raw.as_slice());
+ 
+    let mut g_inv_a = PolyMatrixRaw::zero(&mlwe_params, t_exp * dimension, 1);
+    gadget_invert_rdim(&mut g_inv_a, &ct_auto_raw_transpose, dimension);
+
+    let mut g_inv_a_transpose = PolyMatrixRaw::zero(&mlwe_params, 1, t_exp * dimension);
+    g_inv_a_transpose.as_mut_slice().copy_from_slice(&g_inv_a.as_slice());
+
+    let g_inv_a_ntt = g_inv_a_transpose.ntt(); // what we want
+    
+    let result_a = &g_inv_a_ntt * &pub_param; 
+
+    (g_inv_a_ntt, result_a)
+
+}
+
 fn homomorphic_automorph<'a>(
     params: &'a Params,
     t: usize,
@@ -2626,5 +2661,48 @@ mod test {
 	//let b = ct_a.ntt() * 
 
 //////////////////////////////////////////////////
+    }
+
+    #[test]
+    fn test_mlwe_automorph() {
+	let pt_byte_log2 = 7;
+	let params = params_for_scenario(1<<30, 1);
+	let mut mlwe_params = params.clone();
+	mlwe_params.poly_len = 1<<pt_byte_log2;
+	mlwe_params.poly_len_log2 = pt_byte_log2;
+	let mut client = Client::init(&params);
+	client.generate_secret_keys();
+
+	let dimension = params.poly_len / mlwe_params.poly_len;
+
+	let scale_k = params.modulus / params.pt_modulus;
+
+	let tables = generate_automorph_tables_brute_force(&mlwe_params);
+
+	let t_exp = params.t_exp_left;
+	let pack_seed = [1u8; 32];
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
+
+	for i in 0..(1<<pt_byte_log2){
+	    poly.data[i*dimension] = (i as u64) * scale_k;
+	}
+
+	let ct = client.encrypt_matrix_reg(&poly.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); // ciphertext
+
+	//let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(
+
+	let mut ct_a = ct.submatrix(0, 0, 1, 1);
+	let mut ct_b = ct.submatrix(1, 0, 1, 1);
+
+	let mlwe_a = rlwe_to_mlwe_a(&params, &ct_a.raw().as_slice().to_vec(), pt_byte_log2);
+	let mlwe_b = rlwe_to_mlwe_b(&params, &ct_b.raw().as_slice().to_vec(), pt_byte_log2);
+
+	let mut mlwe_a_poly = PolyMatrixRaw::zero(&mlwe_params, dimension, dimension);
+	let mut mlwe_b_poly = PolyMatrixRaw::zero(&mlwe_params, dimension, 1);
+
+	mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a);
+	mlwe_b_poly.as_mut_slice().copy_from_slice(&mlwe_b);
+
     }
 }
