@@ -54,7 +54,6 @@ fn mlwe_automorph_b<'a>(
 
     let mut key_switch_b = PolyMatrix::zero(mlwe_params, 1, 1);
     multiply_no_reduce(&mut key_switch_b, &decomp_a, &pub_param, 0);
-    //scalar_multiply_avx(&mut key_switch_b, &decomp_a, &pub_param);
 
     fast_add_into_no_reduce(&mut ct_auto, &key_switch_b);
 
@@ -2853,7 +2852,7 @@ mod test {
 	//let mut dec = decrypt_mlwe(&params, &mlwe_params, &mlwe_a_poly.ntt(), &mlwe_b_poly.ntt(), &client);
 
 	//println!("dec: {:?}", dec.as_slice());
-
+	let mut query_a = PolyMatrixNTT::zero(&mlwe_params, dimension * mlwe_params.poly_len, dimension);
 	let mut cipher_a_vec = Vec::new();
 	let mut decomposition_a_vec = Vec::new();
 	for i in 0..dimension{
@@ -2861,11 +2860,23 @@ mod test {
 	    cipher_a_vec.push(ct_a_vec);
 	    decomposition_a_vec.push(decomp_a_vec);
 	}
+
+	let mut index = 0;
+
+	for i in 0..dimension {
+	    for j in 0..mlwe_params.poly_len {
+		query_a.as_mut_slice()[index*mlwe_params.poly_len*2*dimension..(index+1)*mlwe_params.poly_len*2*dimension].copy_from_slice(&cipher_a_vec[i][j].as_slice());
+	    index = index + 1;
+	    }
+	}
 	
-	println!("hello!");	
+	
 
 	let mut cipher_b_vec = Vec::new();
 	//let mut cipher_b_vec: Vec<Vec<PolyMatrixNTT>> = Vec::with_capacity(dimension);
+
+	let mut query = PolyMatrixNTT::zero(&mlwe_params, dimension * mlwe_params.poly_len, 1);	
+
 	let start = Instant::now();
 	for i in 0..dimension {
 	    //let vec_b_tmp = &input_vec_b[i];
@@ -2874,6 +2885,17 @@ mod test {
 	    cipher_b_vec.push(ct_b_vec);
 	}
 
+///////////////////////////////////////////////////////////////////////////////////
+	
+	
+
+	index = 0;
+	for i in 0..dimension {
+	    for j in 0..mlwe_params.poly_len {
+		query.as_mut_slice()[index*mlwe_params.poly_len*2..(index+1)*mlwe_params.poly_len*2].copy_from_slice(&cipher_b_vec[i][j].as_slice());
+	    index = index + 1;
+	    }
+	}
 	
 
 	let end = Instant::now();
@@ -2890,6 +2912,16 @@ mod test {
 		else{
 		    assert_eq!(dec_1.data[0], 0);
 		}
+	    }
+	}
+
+	for i in 0..query.get_rows(){
+	    let mut dec_2 = decrypt_mlwe(&params, &mlwe_params, &query_a.submatrix(i, 0, 1, dimension), &query.submatrix(i, 0, 1, 1), &client);
+	    if (i == 4) {
+		assert_eq!(dec_2.data[0], 128);
+	    }
+	    else{
+		assert_eq!(dec_2.data[0], 0);
 	    }
 	}
 
