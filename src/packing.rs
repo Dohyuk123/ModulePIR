@@ -54,8 +54,9 @@ fn mlwe_automorph_b<'a>(
 
     let mut key_switch_b = PolyMatrix::zero(mlwe_params, 1, 1);
     multiply_no_reduce(&mut key_switch_b, &decomp_a, &pub_param, 0);
+    //scalar_multiply_avx(&mut key_switch_b, &decomp_a, &pub_param);
 
-    fast_add_into(&mut ct_auto, &key_switch_b);
+    fast_add_into_no_reduce(&mut ct_auto, &key_switch_b);
 
     ct_auto
 }
