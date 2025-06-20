@@ -96,7 +96,7 @@ fn query_expansion_a_to_mat<'a>(
     mlwe_params: &'a Params,
     dimension : usize,
     t_exp: usize, 
-    ct_a: PolyMatrixNTT<'a>,
+    ct_a: &PolyMatrixNTT<'a>,
     pub_param: &[PolyMatrixNTT<'a>],
     auto_table: &[Vec<usize>], // automorph_table
     expansion_table: &[PolyMatrixNTT<'a>],
@@ -162,6 +162,33 @@ fn query_expansion_mlwe_b<'a>(
 	}
     }
     ct_b_vec
+}
+
+fn query_expansion_b_to_mat<'a>(
+    params: &'a Params, 
+    mlwe_params: &'a Params,
+    dimension : usize,
+    t_exp: usize,
+    ct_b_vec: &Vec<PolyMatrixNTT<'a>>,
+    pub_param: &[PolyMatrixNTT<'a>],
+    auto_table: &[Vec<usize>], 
+    expansion_table: &[PolyMatrixNTT<'a>], 
+    decomp_vec : &Vec<Vec<PolyMatrixNTT<'a>>>,
+) -> PolyMatrixNTT<'a> {
+
+    let mut query_b = PolyMatrixNTT::zero(mlwe_params, dimension * mlwe_params.poly_len, 1);
+
+    let mut index = 0;
+    for i in 0..dimension{
+	let expanded_vec = query_expansion_mlwe_b(mlwe_params, dimension, t_exp, &ct_b_vec[i], &pub_param, &auto_table, &expansion_table, &decomp_vec[i]);
+	for j in 0..mlwe_params.poly_len{
+	    query_b.as_mut_slice()[index*mlwe_params.poly_len*2..(index+1)*mlwe_params.poly_len*2].copy_from_slice(&expanded_vec[j].as_slice());
+	    index = index + 1;
+    	}
+    }
+
+    query_b
+
 }
 
 fn homomorphic_automorph<'a>(
@@ -2862,7 +2889,7 @@ mod test {
 	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
 	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
 
-	poly.data[4*dimension] = scale_k as u64;
+	poly.data[8*dimension] = scale_k as u64; // plaintext
 	
 	let expansion_table = create_expansion_table(&mlwe_params, mlwe_params.poly_len_log2);
 
@@ -2871,107 +2898,38 @@ mod test {
 	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut client);
 
 	let mut ct_a = ct.submatrix(0, 0, 1, 1);
-	let mut ct_b = ct.submatrix(1, 0, 1, 1);
-
-	//let (query_a_tmp, vec_decomp) = query_expansion_a_to_mat(&params, &mlwe_params, dimension, t_exp, ct_a, &expansion_key_a, &auto_table, &expansion_table);
-
-	let mlwe_a = rlwe_to_mlwe_a(&params, &ct_a.raw().as_slice().to_vec(), pt_byte_log2);
-	let mlwe_b = rlwe_to_mlwe_b(&params, &ct_b.raw().as_slice().to_vec(), pt_byte_log2);
-
 	
-	let mut input_vec_a = Vec::new();
+//////////////////////////////////////////a!!/////////////////////////////////////
+
+	let (query_a_tmp, vec_decomp) = query_expansion_a_to_mat(&params, &mlwe_params, dimension, t_exp, &ct_a, &expansion_key_a, &auto_table, &expansion_table);
+//////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////client's part////////////////////////////////////////////////
+
+	let mut ct_b = ct.submatrix(1, 0, 1, 1);
+	let mlwe_b = rlwe_to_mlwe_b(&params, &ct_b.raw().as_slice().to_vec(), pt_byte_log2);
 	let mut input_vec_b = Vec::new();
 	for i in 0..dimension{
-	    let mut mlwe_a_poly = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
 	    let mut mlwe_b_poly = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
-
-	    mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a[i*(mlwe_params.poly_len * dimension)..(i+1)*(mlwe_params.poly_len * dimension)]);
 	    mlwe_b_poly.as_mut_slice().copy_from_slice(&mlwe_b[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len]);
 	    let mut mlwe_b_poly_ntt = mlwe_b_poly.ntt();
-	    input_vec_a.push(mlwe_a_poly);
-	    input_vec_b.push(mlwe_b_poly.ntt());	
-	}
-	//let mut dec = decrypt_mlwe(&params, &mlwe_params, &mlwe_a_poly.ntt(), &mlwe_b_poly.ntt(), &client);
-
-	//println!("dec: {:?}", dec.as_slice());
-	let mut query_a = PolyMatrixNTT::zero(&mlwe_params, dimension * mlwe_params.poly_len, dimension);
-	let mut cipher_a_vec = Vec::new();
-	let mut decomposition_a_vec = Vec::new();
-	for i in 0..dimension{
-	    let (ct_a_vec, decomp_a_vec) = query_expansion_mlwe_a(&mlwe_params, dimension, t_exp, input_vec_a[i].ntt(), &expansion_key_a, &auto_table, &expansion_table);
-	    cipher_a_vec.push(ct_a_vec);
-	    decomposition_a_vec.push(decomp_a_vec);
+	    input_vec_b.push(mlwe_b_poly.ntt()); // send this to server	
 	}
 
-	let mut index = 0;
-
-	for i in 0..dimension {
-	    for j in 0..mlwe_params.poly_len {
-		query_a.as_mut_slice()[index*mlwe_params.poly_len*2*dimension..(index+1)*mlwe_params.poly_len*2*dimension].copy_from_slice(&cipher_a_vec[i][j].as_slice());
-	    index = index + 1;
-	    }
-	}
-	
-	
-
-	let mut cipher_b_vec = Vec::new();
-	//let mut cipher_b_vec: Vec<Vec<PolyMatrixNTT>> = Vec::with_capacity(dimension);
-
-	let mut query = PolyMatrixNTT::zero(&mlwe_params, dimension * mlwe_params.poly_len, 1);	
+/////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////b!! server's part/////////////////////////////////////////////////
 
 	let start = Instant::now();
-	for i in 0..dimension {
-	    //let vec_b_tmp = &input_vec_b[i];
-	    let ct_b_vec = query_expansion_mlwe_b(&mlwe_params, dimension, t_exp, &input_vec_b[i], &expansion_key_b, &auto_table, &expansion_table, &decomposition_a_vec[i]);
-	    //cipher_b_vec[i] = ct_b_vec;
-	    cipher_b_vec.push(ct_b_vec);
-	}
-
-///////////////////////////////////////////////////////////////////////////////////
-	
-	
-
-	index = 0;
-	for i in 0..dimension {
-	    for j in 0..mlwe_params.poly_len {
-		query.as_mut_slice()[index*mlwe_params.poly_len*2..(index+1)*mlwe_params.poly_len*2].copy_from_slice(&cipher_b_vec[i][j].as_slice());
-	    index = index + 1;
-	    }
-	}
-	
-
+	let query_b_tmp = query_expansion_b_to_mat(&params, &mlwe_params, dimension, t_exp, &input_vec_b, &expansion_key_b, &auto_table, &expansion_table, &vec_decomp);	
 	let end = Instant::now();
 
-	
+//////////////////////////////////////////////////////////////////////////////////////////////////
 
-	for i in 0..cipher_a_vec.len(){
-	    for j in 0..cipher_a_vec[0].len() {
-		let mut dec_1 = decrypt_mlwe(&params, &mlwe_params, &cipher_a_vec[i][j], &cipher_b_vec[i][j], &client);
-		println!("{:?}", dec_1.as_slice());
-		if(i == 0 && j==4){
-		    assert_eq!(dec_1.data[0], 128);
-		}
-		else{
-		    assert_eq!(dec_1.data[0], 0);
-		}
-	    }
-	}
-
-	//for i in 0..query.get_rows(){
-	//    let mut dec_2 = decrypt_mlwe(&params, &mlwe_params, &query_a.submatrix(i, 0, 1, dimension), &query.submatrix(i, 0, 1, 1), &client);
-	//    if (i == 4) {
-	//	assert_eq!(dec_2.data[0], 128);
-	//    }
-	//    else{
-	//	assert_eq!(dec_2.data[0], 0);
-	//    }
-	//}
-
-	let dec_vec = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &query_a, &query, &client);
+	let dec_vec = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &query_a_tmp, &query_b_tmp, &client);
 
 	for i in 0..dec_vec.len(){
 	    println!("{}, {:?}", i, dec_vec[i].as_slice());
-	    if (i == 4) {
+	    if (i == 8) {
 		assert_eq!(dec_vec[i].data[0], 128);
 	    }
 	    else{
