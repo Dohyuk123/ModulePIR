@@ -52,11 +52,12 @@ fn mlwe_automorph_b<'a>(
     let mut ct_auto = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
     apply_automorph_ntt(&mlwe_params, &table, &ct_b, &mut ct_auto, t);
 
-    let key_switch_b = decomp_a * pub_param;
+    let mut key_switch_b = PolyMatrix::zero(mlwe_params, 1, 1);
+    multiply_no_reduce(&mut key_switch_b, &decomp_a, &pub_param, 0);
 
-    let result_b = &ct_auto + &key_switch_b;
+    fast_add_into(&mut ct_auto, &key_switch_b);
 
-    result_b
+    ct_auto
 }
 
 fn query_expansion_mlwe_a<'a>(
@@ -94,26 +95,29 @@ fn query_expansion_mlwe_b<'a>(
     mlwe_params: &'a Params,
     dimension : usize, 
     t_exp: usize, 
-    ct_b: PolyMatrixNTT<'a>, 
+    ct_b: &PolyMatrixNTT<'a>, 
     pub_param: &[PolyMatrixNTT<'a>], 
     auto_table: &[Vec<usize>],
     expansion_table: &[PolyMatrixNTT<'a>], 
     decomp_vec : &[PolyMatrixNTT<'a>],
 ) -> Vec<PolyMatrixNTT<'a>> {
     let mut ct_b_1 = PolyMatrixNTT::zero(mlwe_params, 1, 1);
+    let mut ct_b_copy = PolyMatrixNTT::zero(mlwe_params, 1, 1);
+    ct_b_copy.as_mut_slice().copy_from_slice(ct_b.as_slice());
     let mut ct_b_vec = Vec::new();
-    ct_b_vec.push(ct_b);
+    ct_b_vec.push(ct_b_copy);
 
     let mut index = 0;
     for i in 0..mlwe_params.poly_len_log2{
 	for k in 0..(1<<i) {
-	    let mut ct_b_1 = &expansion_table[i] * &ct_b_vec[k];
-
+	    scalar_multiply_avx(&mut ct_b_1, &ct_b_vec[k], &expansion_table[i]);
 	    let mut ct_0_result_b = mlwe_automorph_b(&mlwe_params, (mlwe_params.poly_len >> i) + 1, dimension, t_exp, &ct_b_vec[k], &decomp_vec[index], &pub_param[i], &auto_table);
 	    let mut ct_1_result_b = mlwe_automorph_b(&mlwe_params, (mlwe_params.poly_len >> i) + 1, dimension, t_exp, &ct_b_1, &decomp_vec[index+1], &pub_param[i], &auto_table);
 
-	    ct_b_vec[k] = &ct_0_result_b + &ct_b_vec[k];
-	    ct_b_vec.push(&ct_1_result_b + &ct_b_1);
+	    fast_add_into(&mut ct_b_vec[k], &ct_0_result_b);
+	    fast_add_into(&mut ct_1_result_b, &ct_b_1);
+	    ct_b_vec.push(ct_1_result_b);
+
 	    index = index + 2;
 	}
     }
@@ -2786,9 +2790,9 @@ mod test {
 	
 	let mlwe_a_poly_ntt = mlwe_a_poly.ntt();
 
-	let (decomp_a, auto_a) = mlwe_automorph_a(&mlwe_params, 33, dimension, t_exp, &mlwe_a_poly.ntt(), &expansion_key_a[2], &tables);
+	let (decomp_a, auto_a) = mlwe_automorph_a(&mlwe_params, 129, dimension, t_exp, &mlwe_a_poly.ntt(), &expansion_key_a[0], &tables);
 
-	let auto_b = mlwe_automorph_b(&mlwe_params, 33, dimension, t_exp, &mlwe_b_poly.ntt(), &decomp_a, &expansion_key_b[2], &tables);
+	let auto_b = mlwe_automorph_b(&mlwe_params, 129, dimension, t_exp, &mlwe_b_poly.ntt(), &decomp_a, &expansion_key_b[0], &tables);
 
 	println!("{}, {}", auto_a.get_rows(), auto_a.get_cols());
 	println!("{}, {}", auto_b.get_rows(), auto_b.get_cols());
@@ -2832,25 +2836,63 @@ mod test {
 	let mlwe_a = rlwe_to_mlwe_a(&params, &ct_a.raw().as_slice().to_vec(), pt_byte_log2);
 	let mlwe_b = rlwe_to_mlwe_b(&params, &ct_b.raw().as_slice().to_vec(), pt_byte_log2);
 
-	let mut mlwe_a_poly = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
-	let mut mlwe_b_poly = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
+	
+	let mut input_vec_a = Vec::new();
+	let mut input_vec_b = Vec::new();
+	for i in 0..dimension{
+	    let mut mlwe_a_poly = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
+	    let mut mlwe_b_poly = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
 
-	mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a[0..(mlwe_params.poly_len * dimension)]);
-	mlwe_b_poly.as_mut_slice().copy_from_slice(&mlwe_b[0..mlwe_params.poly_len]);
-	let mut dec = decrypt_mlwe(&params, &mlwe_params, &mlwe_a_poly.ntt(), &mlwe_b_poly.ntt(), &client);
+	    mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a[i*(mlwe_params.poly_len * dimension)..(i+1)*(mlwe_params.poly_len * dimension)]);
+	    mlwe_b_poly.as_mut_slice().copy_from_slice(&mlwe_b[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len]);
+	    let mut mlwe_b_poly_ntt = mlwe_b_poly.ntt();
+	    input_vec_a.push(mlwe_a_poly);
+	    input_vec_b.push(mlwe_b_poly.ntt());	
+	}
+	//let mut dec = decrypt_mlwe(&params, &mlwe_params, &mlwe_a_poly.ntt(), &mlwe_b_poly.ntt(), &client);
 
-	println!("dec: {:?}", dec.as_slice());
+	//println!("dec: {:?}", dec.as_slice());
 
-	let (ct_a_vec, decomp_a_vec) = query_expansion_mlwe_a(&mlwe_params, dimension, t_exp, mlwe_a_poly.ntt(), &expansion_key_a, &auto_table, &expansion_table);
+	let mut cipher_a_vec = Vec::new();
+	let mut decomposition_a_vec = Vec::new();
+	for i in 0..dimension{
+	    let (ct_a_vec, decomp_a_vec) = query_expansion_mlwe_a(&mlwe_params, dimension, t_exp, input_vec_a[i].ntt(), &expansion_key_a, &auto_table, &expansion_table);
+	    cipher_a_vec.push(ct_a_vec);
+	    decomposition_a_vec.push(decomp_a_vec);
+	}
 	
 	println!("hello!");	
 
-	let ct_b_vec = query_expansion_mlwe_b(&mlwe_params, dimension, t_exp, mlwe_b_poly.ntt(), &expansion_key_b, &auto_table, &expansion_table, &decomp_a_vec);
-
-	for i in 0..ct_a_vec.len() {
-	    let mut dec_1 = decrypt_mlwe(&params, &mlwe_params, &ct_a_vec[i], &ct_b_vec[i], &client);
-	    println!("{:?}", dec_1.as_slice());
+	let mut cipher_b_vec = Vec::new();
+	//let mut cipher_b_vec: Vec<Vec<PolyMatrixNTT>> = Vec::with_capacity(dimension);
+	let start = Instant::now();
+	for i in 0..dimension {
+	    //let vec_b_tmp = &input_vec_b[i];
+	    let ct_b_vec = query_expansion_mlwe_b(&mlwe_params, dimension, t_exp, &input_vec_b[i], &expansion_key_b, &auto_table, &expansion_table, &decomposition_a_vec[i]);
+	    //cipher_b_vec[i] = ct_b_vec;
+	    cipher_b_vec.push(ct_b_vec);
 	}
+
+	
+
+	let end = Instant::now();
+
+	
+
+	for i in 0..cipher_a_vec.len(){
+	    for j in 0..cipher_a_vec[0].len() {
+		let mut dec_1 = decrypt_mlwe(&params, &mlwe_params, &cipher_a_vec[i][j], &cipher_b_vec[i][j], &client);
+		println!("{:?}", dec_1.as_slice());
+		if(i == 0 && j==4){
+		    assert_eq!(dec_1.data[0], 128);
+		}
+		else{
+		    assert_eq!(dec_1.data[0], 0);
+		}
+	    }
+	}
+
+	println!("expansion fn time : {:?}", end - start);
     }
 }
 
