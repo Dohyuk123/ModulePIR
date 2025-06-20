@@ -6,7 +6,7 @@ use spiral_rs::{arith::*, gadget::*, ntt::*, params::*, poly::*};
 
 use crate::server::Precomp;
 
-use super::util::*;
+use super::{util::*, server::*};
 
 fn mlwe_automorph_a<'a>(
     mlwe_params: &'a Params,
@@ -89,6 +89,46 @@ fn query_expansion_mlwe_a<'a>(
 	}
     }
     (ct_a_vec, decomp_a_vec)
+}
+
+fn query_expansion_a_to_mat<'a>(
+    params: &'a Params,
+    mlwe_params: &'a Params,
+    dimension : usize,
+    t_exp: usize, 
+    ct_a: PolyMatrixNTT<'a>,
+    pub_param: &[PolyMatrixNTT<'a>],
+    auto_table: &[Vec<usize>], // automorph_table
+    expansion_table: &[PolyMatrixNTT<'a>],
+) -> (PolyMatrixNTT<'a>, Vec<Vec<PolyMatrixNTT<'a>>>) {
+    let mlwe_a = rlwe_to_mlwe_a(params, &ct_a.raw().as_slice().to_vec(), mlwe_params.poly_len_log2);
+    let mut input_vec_a = Vec::new();
+    for i in 0..dimension{
+	let mut mlwe_a_poly = PolyMatrixRaw::zero(mlwe_params, 1, dimension);
+
+	mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a[i*(mlwe_params.poly_len * dimension)..(i+1)*(mlwe_params.poly_len * dimension)]);
+	input_vec_a.push(mlwe_a_poly);
+    } 
+
+    let mut query_a = PolyMatrixNTT::zero(&mlwe_params, dimension * mlwe_params.poly_len, dimension);
+    let mut cipher_a_vec = Vec::new();
+    let mut decomposition_a_vec = Vec::new();
+    for i in 0..dimension{
+	let (ct_a_vec, decomp_a_vec) = query_expansion_mlwe_a(mlwe_params, dimension, t_exp, input_vec_a[i].ntt(), &pub_param, &auto_table, &expansion_table);
+	cipher_a_vec.push(ct_a_vec);
+	decomposition_a_vec.push(decomp_a_vec);
+    }
+
+    let mut index = 0;
+    for i in 0..dimension {
+	for j in 0..mlwe_params.poly_len{
+	    query_a.as_mut_slice()[index * mlwe_params.poly_len*2*dimension..(index+1)*mlwe_params.poly_len*2*dimension].copy_from_slice(&cipher_a_vec[i][j].as_slice());
+	    index = index + 1;
+	}
+    }
+
+    (query_a, decomposition_a_vec)
+
 }
 
 fn query_expansion_mlwe_b<'a>(
@@ -2833,6 +2873,8 @@ mod test {
 	let mut ct_a = ct.submatrix(0, 0, 1, 1);
 	let mut ct_b = ct.submatrix(1, 0, 1, 1);
 
+	//let (query_a_tmp, vec_decomp) = query_expansion_a_to_mat(&params, &mlwe_params, dimension, t_exp, ct_a, &expansion_key_a, &auto_table, &expansion_table);
+
 	let mlwe_a = rlwe_to_mlwe_a(&params, &ct_a.raw().as_slice().to_vec(), pt_byte_log2);
 	let mlwe_b = rlwe_to_mlwe_b(&params, &ct_b.raw().as_slice().to_vec(), pt_byte_log2);
 
@@ -2915,18 +2957,32 @@ mod test {
 	    }
 	}
 
-	for i in 0..query.get_rows(){
-	    let mut dec_2 = decrypt_mlwe(&params, &mlwe_params, &query_a.submatrix(i, 0, 1, dimension), &query.submatrix(i, 0, 1, 1), &client);
+	//for i in 0..query.get_rows(){
+	//    let mut dec_2 = decrypt_mlwe(&params, &mlwe_params, &query_a.submatrix(i, 0, 1, dimension), &query.submatrix(i, 0, 1, 1), &client);
+	//    if (i == 4) {
+	//	assert_eq!(dec_2.data[0], 128);
+	//    }
+	//    else{
+	//	assert_eq!(dec_2.data[0], 0);
+	//    }
+	//}
+
+	let dec_vec = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &query_a, &query, &client);
+
+	for i in 0..dec_vec.len(){
+	    println!("{}, {:?}", i, dec_vec[i].as_slice());
 	    if (i == 4) {
-		assert_eq!(dec_2.data[0], 128);
+		assert_eq!(dec_vec[i].data[0], 128);
 	    }
 	    else{
-		assert_eq!(dec_2.data[0], 0);
+		assert_eq!(dec_vec[i].data[0], 0);
 	    }
 	}
+
 
 	println!("expansion fn time : {:?}", end - start);
     }
 }
+
 
 

@@ -277,6 +277,24 @@ pub fn decrypt_mlwe<'a> (
     dec_mlwe
 }
 
+pub fn decrypt_mlwe_batch<'a> (
+    params: &'a Params,
+    mlwe_params: &'a Params,
+    dimension : usize,
+    ct_a: &PolyMatrixNTT<'a>,
+    ct_b: &PolyMatrixNTT<'a>,
+    client: &Client<'a>,
+) -> Vec<PolyMatrixRaw<'a>> {
+
+    let mut vector = Vec::new();
+
+    for i in 0..ct_b.get_rows(){
+	let mut dec = decrypt_mlwe(params, mlwe_params, &ct_a.submatrix(i, 0, 1, dimension), &ct_b.submatrix(i, 0, 1, 1), client);
+        vector.push(dec);
+    }
+    vector
+}
+
 pub fn decrypt_ct_reg_measured<'a>(
     client: &Client<'a>,
     params: &'a Params,
