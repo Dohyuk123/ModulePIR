@@ -170,6 +170,9 @@ pub fn generate_query_expansion_key<'a>(
     sk_reg.as_mut_slice().copy_from_slice(&mlwe_secret_tmp);
 
     let g_exp = build_gadget(params, 1, m_exp);
+
+    println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
+
     let g_exp_ntt = g_exp.ntt();
     let mut res_a = Vec::new(); // result a part
     let mut res_b = Vec::new(); // result b part
@@ -268,7 +271,9 @@ pub fn decrypt_mlwe<'a> (
     let mut dec_mlwe = PolyMatrixRaw::zero(&mlwe_params, b.rows, b.cols);
     let b_raw = b.raw();
 
-    //println!("result ct : {:?}", b_raw.as_slice());
+    let mask: u64 = (1u64 << 41) - 1;
+
+    println!("braw: {}", ((b_raw.data[0] & mask) as f64).log2());
     
     for z in 0..dec_mlwe.data.len() {
 	dec_mlwe.data[z] = rescale(b_raw.data[z], params.modulus, params.pt_modulus);

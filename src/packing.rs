@@ -1,4 +1,5 @@
 use std::{arch::x86_64::*, time::Instant};
+use rand::Rng;
 
 use log::debug;
 
@@ -64,17 +65,19 @@ fn query_expansion_mlwe_a<'a>(
     mlwe_params: &'a Params,
     dimension : usize,
     t_exp: usize, 
+    expansion_time: usize,
     ct_a: PolyMatrixNTT<'a>,
     pub_param: &[PolyMatrixNTT<'a>],
     auto_table: &[Vec<usize>], // automorph_table
     expansion_table: &[PolyMatrixNTT<'a>],
 ) -> (Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>) {
 
+    assert_eq!(expansion_time < mlwe_params.poly_len_log2, true);
     let mut ct_a_vec = Vec::new();
     ct_a_vec.push(ct_a);
     let mut decomp_a_vec = Vec::new();
 
-    for i in 0..mlwe_params.poly_len_log2 {
+    for i in 0..expansion_time {
 	for k in 0..(1<<i) {
 	    let mut ct_a_1 = &expansion_table[i] * &ct_a_vec[k];
 
@@ -96,6 +99,7 @@ fn query_expansion_a_to_mat<'a>(
     mlwe_params: &'a Params,
     dimension : usize,
     t_exp: usize, 
+    expansion_time: usize,
     ct_a: &PolyMatrixNTT<'a>,
     pub_param: &[PolyMatrixNTT<'a>],
     auto_table: &[Vec<usize>], // automorph_table
@@ -110,18 +114,18 @@ fn query_expansion_a_to_mat<'a>(
 	input_vec_a.push(mlwe_a_poly);
     } 
 
-    let mut query_a = PolyMatrixNTT::zero(&mlwe_params, dimension * mlwe_params.poly_len, dimension);
+    let mut query_a = PolyMatrixNTT::zero(&mlwe_params, dimension * (1<<expansion_time), dimension);
     let mut cipher_a_vec = Vec::new();
     let mut decomposition_a_vec = Vec::new();
     for i in 0..dimension{
-	let (ct_a_vec, decomp_a_vec) = query_expansion_mlwe_a(mlwe_params, dimension, t_exp, input_vec_a[i].ntt(), &pub_param, &auto_table, &expansion_table);
+	let (ct_a_vec, decomp_a_vec) = query_expansion_mlwe_a(mlwe_params, dimension, t_exp, expansion_time, input_vec_a[i].ntt(), &pub_param, &auto_table, &expansion_table);
 	cipher_a_vec.push(ct_a_vec);
 	decomposition_a_vec.push(decomp_a_vec);
     }
 
     let mut index = 0;
     for i in 0..dimension {
-	for j in 0..mlwe_params.poly_len{
+	for j in 0..(1<<expansion_time){
 	    query_a.as_mut_slice()[index * mlwe_params.poly_len*2*dimension..(index+1)*mlwe_params.poly_len*2*dimension].copy_from_slice(&cipher_a_vec[i][j].as_slice());
 	    index = index + 1;
 	}
@@ -135,6 +139,7 @@ fn query_expansion_mlwe_b<'a>(
     mlwe_params: &'a Params,
     dimension : usize, 
     t_exp: usize, 
+    expansion_time : usize,
     ct_b: &PolyMatrixNTT<'a>, 
     pub_param: &[PolyMatrixNTT<'a>], 
     auto_table: &[Vec<usize>],
@@ -148,7 +153,7 @@ fn query_expansion_mlwe_b<'a>(
     ct_b_vec.push(ct_b_copy);
 
     let mut index = 0;
-    for i in 0..mlwe_params.poly_len_log2{
+    for i in 0..expansion_time{
 	for k in 0..(1<<i) {
 	    scalar_multiply_avx(&mut ct_b_1, &ct_b_vec[k], &expansion_table[i]);
 	    let mut ct_0_result_b = mlwe_automorph_b(&mlwe_params, (mlwe_params.poly_len >> i) + 1, dimension, t_exp, &ct_b_vec[k], &decomp_vec[index], &pub_param[i], &auto_table);
@@ -169,6 +174,7 @@ fn query_expansion_b_to_mat<'a>(
     mlwe_params: &'a Params,
     dimension : usize,
     t_exp: usize,
+    expansion_time : usize,
     ct_b_vec: &Vec<PolyMatrixNTT<'a>>,
     pub_param: &[PolyMatrixNTT<'a>],
     auto_table: &[Vec<usize>], 
@@ -176,12 +182,12 @@ fn query_expansion_b_to_mat<'a>(
     decomp_vec : &Vec<Vec<PolyMatrixNTT<'a>>>,
 ) -> PolyMatrixNTT<'a> {
 
-    let mut query_b = PolyMatrixNTT::zero(mlwe_params, dimension * mlwe_params.poly_len, 1);
+    let mut query_b = PolyMatrixNTT::zero(mlwe_params, dimension * (1<<expansion_time), 1);
 
     let mut index = 0;
     for i in 0..dimension{
-	let expanded_vec = query_expansion_mlwe_b(mlwe_params, dimension, t_exp, &ct_b_vec[i], &pub_param, &auto_table, &expansion_table, &decomp_vec[i]);
-	for j in 0..mlwe_params.poly_len{
+	let expanded_vec = query_expansion_mlwe_b(mlwe_params, dimension, t_exp, expansion_time, &ct_b_vec[i], &pub_param, &auto_table, &expansion_table, &decomp_vec[i]);
+	for j in 0..(1<<expansion_time){
 	    query_b.as_mut_slice()[index*mlwe_params.poly_len*2..(index+1)*mlwe_params.poly_len*2].copy_from_slice(&expanded_vec[j].as_slice());
 	    index = index + 1;
     	}
@@ -2695,7 +2701,7 @@ mod test {
 
 	let mut dec = decrypt_mlwe(&params, &mlwe_params, &ct_mlwe_a.ntt(), &ct_mlwe_b.ntt(), &client);
 
-	println!("result ct : {:?}", dec.as_slice());
+	//println!("result ct : {:?}", dec.as_slice());
 
     }
 
@@ -2870,13 +2876,16 @@ mod test {
 
     #[test]
     fn test_mlwe_expansion() {
-	let pt_byte_log2 = 7;
-	let params = params_for_scenario(1<<30, 1);
+	let pt_byte_log2 = 8;
+	let mut params = params_for_scenario(1<<30, 1);
+	params.pt_modulus = 1<<8;
+
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len = 128;
-	mlwe_params.poly_len_log2 = 7;
+	mlwe_params.poly_len = 1<<pt_byte_log2;
+	mlwe_params.poly_len_log2 = pt_byte_log2;
 	let mut client = Client::init(&params);
 	client.generate_secret_keys();
+	let expansion_time = 6;
 
 	let dimension = params.poly_len / mlwe_params.poly_len;
 
@@ -2884,16 +2893,21 @@ mod test {
 
 	let auto_table = generate_automorph_tables_brute_force(&mlwe_params);
 
-	let t_exp = params.t_exp_left;
+	let t_exp = 5; // at least 5
 	let pack_seed = [1u8; 32];
 	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
 	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
 
-	poly.data[8*dimension] = scale_k as u64; // plaintext
+	let factor = invert_uint_mod((1<<expansion_time) as u64, params.modulus).unwrap();
+	println!("{}", factor);
+
+	poly.data[0*dimension] = scale_k as u64; // plaintext
+
+	poly = scalar_multiply_alloc(&PolyMatrixRaw::single_value(&params, factor).ntt(), &poly.ntt()).raw();
 	
 	let expansion_table = create_expansion_table(&mlwe_params, mlwe_params.poly_len_log2);
 
-	let ct = client.encrypt_matrix_reg(&poly.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub); // ciphertext
+	let ct = client.encrypt_matrix_scaled_reg(&poly.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub, factor); // ciphertext
 
 	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut client);
 
@@ -2901,7 +2915,7 @@ mod test {
 	
 //////////////////////////////////////////a!!/////////////////////////////////////
 
-	let (query_a_tmp, vec_decomp) = query_expansion_a_to_mat(&params, &mlwe_params, dimension, t_exp, &ct_a, &expansion_key_a, &auto_table, &expansion_table);
+	let (query_a_tmp, vec_decomp) = query_expansion_a_to_mat(&params, &mlwe_params, dimension, t_exp, expansion_time, &ct_a, &expansion_key_a, &auto_table, &expansion_table);
 //////////////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////client's part////////////////////////////////////////////////
@@ -2916,11 +2930,12 @@ mod test {
 	    input_vec_b.push(mlwe_b_poly.ntt()); // send this to server	
 	}
 
+
 /////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////b!! server's part/////////////////////////////////////////////////
 
 	let start = Instant::now();
-	let query_b_tmp = query_expansion_b_to_mat(&params, &mlwe_params, dimension, t_exp, &input_vec_b, &expansion_key_b, &auto_table, &expansion_table, &vec_decomp);	
+	let query_b_tmp = query_expansion_b_to_mat(&params, &mlwe_params, dimension, t_exp, expansion_time, &input_vec_b, &expansion_key_b, &auto_table, &expansion_table, &vec_decomp);	
 	let end = Instant::now();
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2929,8 +2944,8 @@ mod test {
 
 	for i in 0..dec_vec.len(){
 	    println!("{}, {:?}", i, dec_vec[i].as_slice());
-	    if (i == 8) {
-		assert_eq!(dec_vec[i].data[0], 128);
+	    if (i == 0) {
+		assert_eq!(dec_vec[i].data[0], 1);
 	    }
 	    else{
 		assert_eq!(dec_vec[i].data[0], 0);
@@ -2939,6 +2954,46 @@ mod test {
 
 
 	println!("expansion fn time : {:?}", end - start);
+
+	println!("noise width : {}", params.noise_width);
+
+	let mut rng = rand::thread_rng();
+
+	let mut database = PolyMatrixRaw::zero(&mlwe_params, 512, 512);
+	for i in 0..database.as_slice().len(){
+	    database.data[i] = rng.gen_range(0..mlwe_params.pt_modulus);
+	}
+	let database_ntt = database.ntt();
+
+	let result_b = &database_ntt * &query_b_tmp;
+
+	let result_a = &database_ntt * &query_a_tmp;
+	
+	let res_vec = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &result_a, &result_b, &client);
+
+	let mut plaintext = PolyMatrixRaw::zero(&mlwe_params, 512, 1);
+	
+	plaintext.as_mut_slice()[0] = 1;
+
+	for i in 0..dec_vec.len(){
+	    for j in 0..mlwe_params.poly_len{
+		assert_eq!(dec_vec[i].data[j], plaintext.submatrix(i, 0, 1, 1).data[j]);
+	    }
+	}
+
+	let result = &database_ntt * &plaintext.ntt();
+
+	println!("res_vec: {:?}", res_vec[0].as_slice());
+
+	println!("result: {:?}", result.raw().submatrix(0, 0, 1, 1).as_slice());	
+	
+	println!("db: {:?}", database.submatrix(0, 0, 1, 1).as_slice());
+
+	for i in 0..res_vec.len(){
+	    for j in 0..mlwe_params.poly_len{
+		assert_eq!(res_vec[i].data[j], database.submatrix(i, 0, 1, 1).data[j]);
+	    }
+	}
     }
 }
 
