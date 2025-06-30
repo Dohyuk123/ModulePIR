@@ -171,7 +171,7 @@ pub fn generate_query_expansion_key<'a>(
 
     let g_exp = build_gadget(params, 1, m_exp);
 
-    println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
+    //println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
 
     let g_exp_ntt = g_exp.ntt();
     let mut res_a = Vec::new(); // result a part
@@ -273,7 +273,7 @@ pub fn decrypt_mlwe<'a> (
 
     let mask: u64 = (1u64 << 41) - 1;
 
-    println!("braw: {}", ((b_raw.data[0] & mask) as f64).log2());
+    //println!("braw: {}", ((b_raw.data[0] & mask) as f64).log2());
     
     for z in 0..dec_mlwe.data.len() {
 	dec_mlwe.data[z] = rescale(b_raw.data[z], params.modulus, params.pt_modulus);
@@ -928,33 +928,29 @@ mod test {
 	println!("time: {:?}", end - start);
 	mul();
 
-	//let mut po1ynomial_1 = PolyMatrixNTT::zero(&params, 1, 1);
-	//let mut polynomial_2 = PolyMatrixNTT::zero(&params, 1, 1);
-	//let mut pol = PolyMatrixNTT::zero(&params, 1, 1);
+	
 
-	//start = Instant::now();
-	//multiply(&mut pol, &polynomial_1, &polynomial_2);
-	//end = Instant::now();
-	//println!("time: {:?}", end - start);
-
-	params.poly_len = 128;
-	params.poly_len_log2 = 7;
+	params.poly_len = 256;
+	params.poly_len_log2 = 8;
 	let mut polyn_1 = PolyMatrixRaw::zero(&params, 1, 1);
 	let mut polyn_2 = PolyMatrixRaw::zero(&params, 1, 1);
 	let mut polyn_1_ntt = polyn_1.ntt();
 	let mut polyn_2_ntt = polyn_2.ntt();
+
+	let mut poly_tmp1 = PolyMatrixNTT::zero(&params, 512, 1);
+	let mut poly_tmp2 = PolyMatrixRaw::zero(&params, 512*7, 1);
+	let mut poly_tmp3 = PolyMatrixNTT::zero(&params, 63, 1);	
+
 	let start = Instant::now();
-	for i in 0..16 {
-	    //let mut polyn_1_ntt = polyn_1.ntt();
-	    //let mut polyn_2_ntt = polyn_2.ntt();
-	    let mut polyn_result_ntt = &polyn_1_ntt * &polyn_2_ntt;
-	    //let mut polyn_result = polyn_result_ntt.raw();
-	}	
+	let mut raw_1 = poly_tmp1.raw();
+	let mut ntt_1 = poly_tmp2.ntt();
+	let mut raw_2 = poly_tmp3.raw();
+	let mut ntt_2 = raw_2.ntt();	
 	let end = Instant::now();
 
 	let time_ = end - start;
 
-	println!("time: {:?}", (end - start));
+	println!("ntt time: {:?}", (end - start));
 
 	params.poly_len = 2048;
 	params.poly_len_log2 = 11;

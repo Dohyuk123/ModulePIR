@@ -2876,7 +2876,7 @@ mod test {
 
     #[test]
     fn test_mlwe_expansion() {
-	let pt_byte_log2 = 8;
+	let pt_byte_log2 = 9;
 	let mut params = params_for_scenario(1<<30, 1);
 	params.pt_modulus = 1<<8;
 
@@ -2885,9 +2885,15 @@ mod test {
 	mlwe_params.poly_len_log2 = pt_byte_log2;
 	let mut client = Client::init(&params);
 	client.generate_secret_keys();
-	let expansion_time = 6;
+	let expansion_time = 7;
+
+	let database_dim_log2 = params.poly_len_log2 - (mlwe_params.poly_len_log2 - expansion_time);
+	let database_dim = 1<<database_dim_log2;
+
+	let compression_time = database_dim_log2 - expansion_time;
 
 	let dimension = params.poly_len / mlwe_params.poly_len;
+	println!("{}", dimension);
 
 	let scale_k = params.modulus / params.pt_modulus;
 
@@ -2959,19 +2965,23 @@ mod test {
 
 	let mut rng = rand::thread_rng();
 
-	let mut database = PolyMatrixRaw::zero(&mlwe_params, 512, 512);
+	let mut database = PolyMatrixRaw::zero(&mlwe_params, database_dim, database_dim);
 	for i in 0..database.as_slice().len(){
 	    database.data[i] = rng.gen_range(0..mlwe_params.pt_modulus);
 	}
 	let database_ntt = database.ntt();
 
+	let start_ = Instant::now();
 	let result_b = &database_ntt * &query_b_tmp;
+	let end_ = Instant::now();
+
+	println!("expansion fn time : {:?}", end_ - start_);
 
 	let result_a = &database_ntt * &query_a_tmp;
 	
 	let res_vec = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &result_a, &result_b, &client);
 
-	let mut plaintext = PolyMatrixRaw::zero(&mlwe_params, 512, 1);
+	let mut plaintext = PolyMatrixRaw::zero(&mlwe_params, database_dim, 1);
 	
 	plaintext.as_mut_slice()[0] = 1;
 
@@ -2994,6 +3004,11 @@ mod test {
 		assert_eq!(res_vec[i].data[j], database.submatrix(i, 0, 1, 1).data[j]);
 	    }
 	}
+
+	let mut v_ct = Vec::new();
+
+		
+	
     }
 }
 

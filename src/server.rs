@@ -112,10 +112,15 @@ pub fn mlwe_to_rlwe_b<'a>(params: &'a Params, output_poly: &mut PolyMatrixRaw<'a
 pub fn inverse_mlwe_to_mlwe_a(params: &Params, mut a: Vec<u64>, log_pt_byte: usize) ->Vec<u64> {
     let poly_len = 1<<log_pt_byte;
     let mlwe_len = a.len() / (poly_len << 1);
+    //println!("a len, poly len : {}, {}", a.len(), poly_len);
+    //println!("mlwe_len : {}", mlwe_len);
     let mut tmp_vec = vec![0u64; poly_len << 1];
     for i in 0..mlwe_len{
 	a[i * (poly_len << 1) + poly_len .. (i+1) * (poly_len << 1)].rotate_left(1);
 	a[(i+1) * (poly_len <<1) - 1] = params.modulus - a[(i+1) * (poly_len <<1) - 1];
+
+	//println!("{}, {:?}", poly_len, a);
+
 	for j in 0..(poly_len){
 	    tmp_vec[2*j] = a[i * (poly_len << 1) + j];
 	}
@@ -124,17 +129,22 @@ pub fn inverse_mlwe_to_mlwe_a(params: &Params, mut a: Vec<u64>, log_pt_byte: usi
 	}
 	a[i * (poly_len << 1) .. (i+1) * (poly_len << 1)].copy_from_slice(&tmp_vec);
     }
+    //println!("a: {:?}", a);
     a
 }
 
 //a: input mlwe, log_pt_byte : mlwe byte -> params.poly_len // we have to use original parameter
-pub fn mlwe_to_rlwe_a(params: &Params, mut a: Vec<u64>, log_pt_byte: usize) -> Vec<u64> {
+pub fn mlwe_to_rlwe_a(params: &Params, output_poly: &mut PolyMatrixRaw, mut a: Vec<u64>, log_pt_byte: usize){
     let depth = params.poly_len_log2 - log_pt_byte;
+    //println!("{}", log_pt_byte);
     let mut result = inverse_mlwe_to_mlwe_a(params, a, log_pt_byte);
-    for i in 1..depth{
-	result = inverse_mlwe_to_mlwe_a(params, result, log_pt_byte<<i);
+    for i in 1..(depth){
+	//println!("{}", log_pt_byte<<i);
+	result = inverse_mlwe_to_mlwe_a(params, result, log_pt_byte+i);
     }
-    result
+    for i in 0..params.poly_len {
+	output_poly.data[i] = result[i];
+    }
 }
 
 pub fn generate_y_constants<'a>(
@@ -2653,13 +2663,13 @@ mod test {
 	let mlwe_bit = 1;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
-	params.poly_len_log2 = 3;
+	params.poly_len_log2 = 5;
 	params.poly_len = 1<<params.poly_len_log2;
 	mlwe_params.poly_len_log2 = mlwe_bit;
 	mlwe_params.poly_len = 1<<mlwe_bit;
 
 	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
-	for i in 0..8{
+	for i in 0..params.poly_len{
 	    poly.data[i] = i as u64;
 	}
 
@@ -2668,15 +2678,15 @@ mod test {
 
 	//println!("modulus: {}", params.modulus);
 
-	let mut mlwe_result = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, params.poly_len / mlwe_params.poly_len);
-	mlwe_result.as_mut_slice().copy_from_slice(&mlwe);
+	let mut mlwe_result = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, 1);
+	mlwe_result.as_mut_slice().copy_from_slice(&mlwe[0..params.poly_len]);
 	println!("{:?}", mlwe_result.as_slice());
 
-	let mut new_rlwe = mlwe_to_rlwe_a(&params, mlwe_result.as_slice().to_vec(), mlwe_bit);
-	//let mut new_rlwe = inverse_mlwe_to_mlwe_a(&params, mlwe_result.as_slice().to_vec(), mlwe_bit);
-	//new_rlwe = inverse_mlwe_to_mlwe_a(&params, new_rlwe, mlwe_bit<<1);
+	let mut output_poly = PolyMatrixRaw::zero(&params, 1, 1);
 
-	println!("new rlwe: {:?}", new_rlwe);
+	mlwe_to_rlwe_a(&params, &mut output_poly, mlwe_result.as_slice().to_vec(), mlwe_bit);
+
+	println!("new rlwe: {:?}", output_poly.as_slice());
 	println!("modulus : {}", params.modulus);
     }
 
@@ -2687,7 +2697,7 @@ mod test {
 	let mlwe_bit = 1;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
-	params.poly_len_log2 = 3;
+	params.poly_len_log2 = 4;
 	params.poly_len = 1<<params.poly_len_log2;
 	mlwe_params.poly_len_log2 = mlwe_bit;
 	mlwe_params.poly_len = 1<<mlwe_bit;
