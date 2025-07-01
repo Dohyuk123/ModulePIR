@@ -155,6 +155,35 @@ pub fn raw_generate_expansion_params<'a>(
     res
 }
 
+pub fn raw_generate_expansion_params_mlwe<'a>(
+    params: &'a Params,
+    //sk_reg_orig: &PolyMatrixRaw<'a>,
+    sk_reg: &PolyMatrixRaw<'a>,
+    num_exp: usize,
+    m_exp: usize,
+    rng: &mut ChaCha20Rng,
+    rng_pub: &mut ChaCha20Rng,
+) -> Vec<PolyMatrixNTT<'a>> {
+    let g_exp = build_gadget(params, 1, m_exp);
+    //debug!("using gadget base {}", g_exp.get_poly(0, 1)[0]);
+    //println!("gadget: {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
+    let g_exp_ntt = g_exp.ntt();
+    let mut res = Vec::new();
+
+    for i in 0..num_exp {
+        let t = (params.poly_len / (1 << i)) + 1;
+        let tau_sk_reg = automorph_alloc(&sk_reg, t);
+        let prod = &tau_sk_reg.ntt() * &g_exp_ntt;
+
+        // let w_exp_i = client.encrypt_matrix_reg(&prod, rng, rng_pub);
+        let sample = get_fresh_reg_public_key(params, &sk_reg, m_exp, rng, rng_pub);
+        let w_exp_i = &sample + &prod.pad_top(1);
+        res.push(w_exp_i);
+    }
+
+    res
+}
+
 pub fn generate_query_expansion_key<'a>(
     params: &'a Params,
     mlwe_params: &'a Params,
