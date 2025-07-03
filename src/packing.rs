@@ -366,6 +366,26 @@ fn homomorphic_automorph_b_slice<'a>(
     &ct_auto.ntt() + &w_times_ginv_ct_b // b + aB
 }
 
+//pub fn prep_pack_mlwes<'a>(
+//    params: &'a Params,
+//    pt_byte_log: usize, 
+//    t_exp: usize, 
+//    ct_a_vec: &[PolyMatrixNTT<'a>, 
+//    pub_param: &[PolyMatrixNTT<'a>],
+//) -> (Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>) {
+//    decomp_a_vec = Vec::new();
+
+//    let index = params.poly_len_log2 - pt_byte_log;
+//    let num = 1<<index;
+
+//    for i in 0..index{
+//	num_in = num>>(i+1);
+//	for j in 0..num_in{
+	   
+//	}
+//    }
+//}
+
 pub fn prep_query_expansion<'a>(
     params: &'a Params,
     pt_byte_log: usize,
@@ -2742,8 +2762,8 @@ mod test {
 
     #[test]
     fn test_query_expansion_fn_table(){
-	let pt_byte = 2048;
-	let pt_byte_log = 11;
+	let pt_byte = 128;
+	let pt_byte_log = 7;
 	let mut params = params_for_scenario(1 << 30, 1);
 	params.poly_len = 2048;
 	params.poly_len_log2 = 11;
@@ -2805,7 +2825,7 @@ mod test {
 	    for z in 0..dec_rescaled.data.len() {
 	        dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
 	    }
-	    println!("auto result c1 : {:?}", dec_rescaled.as_slice());
+	    println!("auto result c1 :{} {:?}", i, dec_rescaled.as_slice());
 	}
 
 	println!("expansion fn time : {:?}", end - start);
@@ -3200,7 +3220,7 @@ mod test {
 
     #[test]
     fn test_mlwe_expansion() {
-	let pt_byte_log2 = 9;
+	let pt_byte_log2 = 8;
 	let mut params = params_for_scenario(1<<30, 1);
 	params.pt_modulus = 1<<8;
 
@@ -3296,7 +3316,7 @@ mod test {
 	let dec_vec = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &query_a_tmp, &query_b_tmp, &client);
 
 	for i in 0..dec_vec.len(){
-	    //println!("{}, {:?}", i, dec_vec[i].as_slice());
+	    println!("{}, {:?}", i, dec_vec[i].as_slice());
 	    if (i == 0) {
 		assert_eq!(dec_vec[i].data[0], 1);
 	    }
@@ -3341,6 +3361,7 @@ mod test {
 	let result = &database_ntt * &plaintext.ntt();
 
 	println!("res_vec: {:?}", res_vec[0].as_slice());
+	println!();
 
 	println!("result: {:?}", result.raw().submatrix(0, 0, 1, 1).as_slice());	
 	
@@ -3352,10 +3373,60 @@ mod test {
 	    }
 	}
 
+	let add_a = &result_a.submatrix(0, 0, 1, dimension) + &result_a.submatrix(1, 0, 1, dimension);
+	let add_b = &result_b.submatrix(0, 0, 1, 1) + &result_a.submatrix(1, 0, 1, 1);
+
+	//println!("hi");
+
+	let res_add = decrypt_mlwe(&params, &mlwe_params, &add_a, &add_b, &client);
+
+	//println!("hello");
+
+	//println!("db: {:?}", database.submatrix(1, 0, 1, 1).as_slice());
+	
+
+	println!();
+	//println!("res_add: {:?}", res_add.as_slice());
+	for j in 0..mlwe_params.poly_len{
+	//    println!("{}", j);
+	//    assert_eq!((database.submatrix(0, 0, 1, 1).data[j] + database.submatrix(1, 0, 1, 1).data[j]) % 256, res_add.data[j]);
+	}
+
 	//let mut v_ct = Vec::new();
 
 		
 	
+    }
+
+    fn test_mlwe_packing(){
+	let params = params_for_scenario(1<<30, 1);
+	let pt_byte_log2 = 8;
+//	let mut params = param_for_scenario(1<<30, 1);
+
+	let mut mlwe_params = params.clone();
+	mlwe_params.poly_len = 1<<pt_byte_log2;
+	mlwe_params.poly_len_log2 = pt_byte_log2;
+	let mut client = Client::init(&params);
+	client.generate_secret_keys();
+
+	let y_constant = generate_y_constants(&params);
+
+	let scale_k = params.modulus / params.pt_modulus;
+
+	let pack_seed = [1u8; 32];
+	let cts_seed = [2u8; 32];
+	let mut ct_pub_rng = ChaCha20Rng::from_seed(cts_seed);
+
+	let pack_pub_params = raw_generate_expansion_params(&params, client.get_sk_reg(), params.poly_len_log2 - mlwe_params.poly_len_log2, params.t_exp_left, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed),);
+
+	let mut fake_pack_pub_params = pack_pub_params.clone();
+
+	for i in 0..pack_pub_params.len() {
+	    for col in 0..pack_pub_params[i].cols {
+		fake_pack_pub_params[i].get_poly_mut(1, col).fill(0);
+	    }
+	}
+
     }
 }
 

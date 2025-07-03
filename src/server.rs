@@ -2649,8 +2649,8 @@ where
 mod test {
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
-    use spiral_rs::{client::Client, number_theory::invert_uint_mod, util::get_test_params, arith::*, gadget::*, ntt::*, params::*, poly::*};
-
+    use spiral_rs::{client::Client, number_theory::invert_uint_mod, util::get_test_params, arith::*, gadget::*, ntt::*, params::*, poly::*, aligned_memory::AlignedMemory64};
+    //use super::server::ToM512;
     use crate::{
         client::*, params::params_for_scenario,
         server::*,
@@ -2723,5 +2723,121 @@ mod test {
 	println!("{:?}", output_poly.as_slice());
 	
 
+    }
+
+    #[test]
+    fn test_matrix_mult(){
+	let mut params = params_for_scenario(1<<30, 1);
+	params.db_dim_1 = 0;
+	params.db_dim_2 = 0;
+	
+	println!("{}, {}", params.db_dim_1, params.db_dim_2);
+	let db_rows: usize = 1<<(params.db_dim_1 + params.poly_len_log2);
+	let db_cols: usize = 1<<(params.db_dim_2 + params.poly_len_log2);
+	let mut rng = rand::thread_rng();
+	
+	let mut matrix = Vec::with_capacity(db_rows * db_cols);
+
+	for i in 0..db_rows{
+	    for j in 0..db_cols{
+		matrix.push(1 as u16);
+	    }
+	}	
+	//for i in 0..(db_rows * db_cols){
+	//    matrix.push(rng.gen::<u16>());
+	//}
+	
+	let server: YServer<u16> = YServer::<u16>::new(
+	    &params,
+	    matrix.into_iter(),
+	    false,
+	    false,
+	    false
+	);
+	//println!("{:?}", server.db());
+
+
+	let mut rng = rand::thread_rng();
+	let mut buf = AlignedMemory64::new(db_rows);
+
+	//assert_eq!(buf.len(), server.db_rows_padded());
+
+	let mut index = 0;
+	for val in buf.as_mut_slice(){
+	    if (index == 2) {
+		*val = 1;
+	    }
+	    else{
+	        *val = 0;
+	    }
+	    index = index + 1;
+
+	    //*val = rng.gen::<u64>() & 0x00FF_FFFF_FFFF_FFFF;
+	}
+
+	//println!("{:?}", buf.as_slice());
+
+	
+
+	let response: AlignedMemory64 = server.answer_query(buf.as_slice());
+	
+    }
+
+    #[test]
+    fn test_multiply_poly_time() {
+	//let params = params_for_scenario(1 << 30, 1);
+
+    //const K: usize = 1;        // 배치 크기
+    //const A_ROWS: usize = 512; // A 행 수
+    //const A_COLS: usize = 1;   // A 열 수
+    //const B_ROWS: usize = 512; // B 행 수
+    //const B_COLS: usize = 512; // B 열 수
+
+    //let mut rng = rand::thread_rng();
+
+    // 1) A: 56bit 랜덤값, 512x1 → u64 벡터 (정렬된 메모리)
+    //let mut a = AlignedMemory64::<u64>::new(A_ROWS * A_COLS);
+    //for val in a.as_mut_slice() {
+    //    *val = rng.gen::<u64>() & 0x00FF_FFFF_FFFF_FFFF;
+    //}
+
+    // 2) B: 16bit 랜덤값, 512x512 → u32 벡터 (정렬된 메모리)
+    //let mut b_16 = AlignedMemory64::<u16>::new(B_ROWS * B_COLS);
+    //for val in b_16.as_mut_slice() {
+    //    *val = rng.gen();
+    //}
+
+    // 3) B를 u32로 변환하면서 transpose (정렬 보장)
+//    let mut b_t = AlignedMemory64::<u32>::new(B_ROWS * B_COLS);
+//    {
+//        let b_16_slice = b_16.as_slice();
+//        let b_t_slice = b_t.as_mut_slice();
+//        for col in 0..B_COLS {
+//            for row in 0..B_ROWS {
+//                let val = b_16_slice[row * B_COLS + col];
+//                b_t_slice[col * B_ROWS + row] = val as u32;
+//            }
+//        }
+//    }
+
+    // 4) 결과 버퍼: 1 x 512 u64, 정렬 보장
+//    let mut c = AlignedMemory64::<u64>::new(B_COLS);
+
+    let start = Instant::now();
+
+//    unsafe {
+//        fast_batched_dot_product_avx512::<K, u32>(
+//            &params,
+//            c.as_mut_slice(),
+//            a.as_slice(),
+//            A_ROWS * A_COLS,
+//            b_t.as_slice(),
+//            B_ROWS,
+//            B_COLS,
+//        );
+//    }
+
+    let end = Instant::now();
+    println!("time elapsed: {:?}", end - start);
     }
 }

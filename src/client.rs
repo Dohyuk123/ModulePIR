@@ -802,7 +802,7 @@ impl<'a> NewClient<'a> {
 mod test {
     use super::*;
     use crate::{
-	params::params_for_scenario, server::*
+	params::params_for_scenario, server::*, kernel::*
 	//packing::*
     };
     use std::time::Instant;
@@ -925,83 +925,7 @@ mod test {
 	
     }
 
-    #[test]
-    fn test_multiply_poly_time() {
-	let mut params = params_for_scenario(1<<30, 1);
-	let mut new_params = params.clone();
-	let dimension = 1024;
-	let mut db_tmp = PolyMatrixNTT::zero(&new_params, dimension, 1);
-
-	params.poly_len = 128;
-	params.poly_len_log2 = 7;
-	let mut exp = PolyMatrixNTT::zero(&params, 1, 1);
-	println!("length: {}", exp.as_slice().len());
-	let mut db = PolyMatrixNTT::zero(&params, dimension, dimension);
-	let mut query1 = PolyMatrixRaw::zero(&params, dimension, 1); // query 1
-	let mut query2 = PolyMatrixNTT::zero(&params, dimension, 1);
-	let mut res_poly = PolyMatrixNTT::zero(&params, dimension, 1); // result 1
-	let mut poly_3 = PolyMatrixRaw::zero(&params, 4, dimension); // decomped
-	let mut res_poly_2 = PolyMatrixNTT::zero(&params, 4, 1); // result 2
-	let mut query1_ntt = query1.ntt();
-	let mut poly_3_ntt = poly_3.ntt();
-
-	let start = Instant::now();
-	//let mut query1_ntt = query1.ntt();
-	db_tmp.raw();
-	multiply(&mut res_poly, &db, &query1_ntt); // db * query 1
-	let mut res_poly_raw = res_poly.raw(); // db*query 1 = dimension by 1
-	//let mut query2_ntt = query2.raw();
-	//query2 = query2_ntt.ntt();
-	multiply(&mut res_poly_2, &poly_3.ntt(), &query2); 
-	let end = Instant::now();
-	println!("time: {:?}", end - start);
-	mul();
-
-	
-
-	params.poly_len = 256;
-	params.poly_len_log2 = 8;
-	let mut polyn_1 = PolyMatrixRaw::zero(&params, 1, 1);
-	let mut polyn_2 = PolyMatrixRaw::zero(&params, 1, 1);
-	let mut polyn_1_ntt = polyn_1.ntt();
-	let mut polyn_2_ntt = polyn_2.ntt();
-
-	let mut poly_tmp1 = PolyMatrixNTT::zero(&params, 512, 1);
-	let mut poly_tmp2 = PolyMatrixRaw::zero(&params, 512*7, 1);
-	let mut poly_tmp3 = PolyMatrixNTT::zero(&params, 63, 1);	
-
-	let start = Instant::now();
-	let mut raw_1 = poly_tmp1.raw();
-	let mut ntt_1 = poly_tmp2.ntt();
-	let mut raw_2 = poly_tmp3.raw();
-	let mut ntt_2 = raw_2.ntt();	
-	let end = Instant::now();
-
-	let time_ = end - start;
-
-	println!("ntt time: {:?}", (end - start));
-
-	params.poly_len = 2048;
-	params.poly_len_log2 = 11;
-	let mut polyn_1 = PolyMatrixRaw::zero(&params, 1, 1);
-	let mut polyn_2 = PolyMatrixRaw::zero(&params, 1, 1);
-	let mut polyn_1_ntt = polyn_1.ntt();
-//	let mut polyn_2_ntt = polyn_2.ntt();	
-	
-	let start = Instant::now();
-
-	let mut polyn_2_ntt = polyn_2.ntt();
-	let mut polyn_result_ntt = &polyn_1_ntt * &polyn_2_ntt;
-	let mut polyn_result = polyn_result_ntt.raw();
-		
-	let end = Instant::now();
-	//let mut polyn = PolyMatrixNTT::zero(&params, 1, 1);
-	
-	//start = Instant::now();
-	//multiply(&mut polyn, &polyn_1, &polyn_2);
-	//end = Instant::now();
-	println!("time: {:?}", (end - start));
-    }
+    
 
     #[test]
     fn test_poly() { // multiply : matrix multiplication
