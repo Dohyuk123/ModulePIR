@@ -28,6 +28,16 @@ use super::{
     util::*,
 };
 
+//pub fn query_mlwe_pack<'a>(params: &Params, client: &mut Client, query_num: usize)->AlignedMemory64 {
+//    let y_client = YClient::new(&mut client, &params);
+//    let query_col = y_client.generate_query(SEED_1, params.db_dim_1, true, query_num);
+//
+//    let query_col_last_row = &query_col[params.poly_len * (1<<(params.db_dim_1 + params.poly_len_log2))..];
+//    let packed_query_col = pack_query(&params, query_col_last_row);
+
+//    packed_query_col
+//}
+
 pub fn mlwe_to_mlwe_a(params: &Params, a: &Vec<u64>, mlwe_dim: usize, n: usize, len: usize) -> Vec<u64>{
     let mut combined_vec: Vec<u64> = vec![0; 2 * len]; // Allocate memory once
     let half_mlwe_dim = mlwe_dim / 2;
@@ -589,27 +599,14 @@ where
 
     pub fn multiply_with_db_ring(
         &self,
-        preprocessed_query: &[PolyMatrixNTT],
+        preprocessed_query: &[PolyMatrixNTT], // 8
         col_range: Range<usize>,
         seed_idx: u8,
     ) -> Vec<u64> {
         let db_rows_poly = 1 << (self.params.db_dim_1);
         let db_rows = 1 << (self.params.db_dim_1 + self.params.poly_len_log2);
         assert_eq!(preprocessed_query.len(), db_rows_poly);
-
-        // assert_eq!(db_rows_poly, 1); // temporary restriction
-
-        // let mut preprocessed_query = Vec::new();
-        // for query_el in query {
-        //     let query_raw = query_el.raw();
-        //     let query_raw_transformed =
-        //         negacyclic_perm(query_raw.get_poly(0, 0), 0, self.params.modulus);
-        //     let mut query_transformed_pol = PolyMatrixRaw::zero(self.params, 1, 1);
-        //     query_transformed_pol
-        //         .as_mut_slice()
-        //         .copy_from_slice(&query_raw_transformed);
-        //     preprocessed_query.push(query_transformed_pol.ntt());
-        // }
+	
 
         let mut result = Vec::new();
         let db = self.db();
@@ -638,16 +635,20 @@ where
             }
 
             let sum_raw = sum.raw();
+	    //println!("sum_raw length: {}", sum_raw.as_slice().len());
 
             // do negacyclic permutation (for first mul only)
             if seed_idx == SEED_0 && !self.ypir_params.is_simplepir {
+		//println!("if");
                 let sum_raw_transformed =
                     negacyclic_perm(sum_raw.get_poly(0, 0), 0, self.params.modulus);
                 result.extend(&sum_raw_transformed);
             } else {
+		//println!("if else");
                 result.extend(sum_raw.as_slice());
             }
         }
+	println!("result length: {}", result.len());
 
         // result
         let now = Instant::now();
@@ -689,6 +690,7 @@ where
 
     pub fn answer_hint_ring(&self, public_seed_idx: u8, cols: usize) -> Vec<u64> {
         let preprocessed_query = self.generate_pseudorandom_query(public_seed_idx);
+	println!("{}", preprocessed_query[0].raw().data[1000]);
 
         let res = self.multiply_with_db_ring(&preprocessed_query, 0..cols, public_seed_idx);
 
@@ -2784,60 +2786,197 @@ mod test {
     }
 
     #[test]
-    fn test_multiply_poly_time() {
-	//let params = params_for_scenario(1 << 30, 1);
+    fn test_encryption(){
+	
+	let params = params_for_scenario(1 << 30, 1);
+	let mut client = Client::init(&params);
+	client.generate_secret_keys(); //generate secret key
+	
 
-    //const K: usize = 1;        // 배치 크기
-    //const A_ROWS: usize = 512; // A 행 수
-    //const A_COLS: usize = 1;   // A 열 수
-    //const B_ROWS: usize = 512; // B 행 수
-    //const B_COLS: usize = 512; // B 열 수
+	let t_exp = params.t_exp_left;
+	let pack_seed = [1u8; 32];
+	
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
 
-    //let mut rng = rand::thread_rng();
+	let scale_k = params.modulus / params.pt_modulus; //scaling factor
 
-    // 1) A: 56bit 랜덤값, 512x1 → u64 벡터 (정렬된 메모리)
-    //let mut a = AlignedMemory64::<u64>::new(A_ROWS * A_COLS);
-    //for val in a.as_mut_slice() {
-    //    *val = rng.gen::<u64>() & 0x00FF_FFFF_FFFF_FFFF;
-    //}
+	let t = 3;
+	let mut query = PolyMatrixRaw::zero(&params, 1, 1);
+	query.data[3] = scale_k; // query index
 
-    // 2) B: 16bit 랜덤값, 512x512 → u32 벡터 (정렬된 메모리)
-    //let mut b_16 = AlignedMemory64::<u16>::new(B_ROWS * B_COLS);
-    //for val in b_16.as_mut_slice() {
-    //    *val = rng.gen();
-    //}
+	let factor = invert_uint_mod(params.poly_len as u64, params.modulus).unwrap();
 
-    // 3) B를 u32로 변환하면서 transpose (정렬 보장)
-//    let mut b_t = AlignedMemory64::<u32>::new(B_ROWS * B_COLS);
-//    {
-//        let b_16_slice = b_16.as_slice();
-//        let b_t_slice = b_t.as_mut_slice();
-//        for col in 0..B_COLS {
-//            for row in 0..B_ROWS {
-//                let val = b_16_slice[row * B_COLS + col];
-//                b_t_slice[col * B_ROWS + row] = val as u32;
-//            }
-//        }
-//    }
+	let ct_0 = client.encrypt_matrix_scaled_reg(&query.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub, factor); //
 
-    // 4) 결과 버퍼: 1 x 512 u64, 정렬 보장
-//    let mut c = AlignedMemory64::<u64>::new(B_COLS);
-
-    let start = Instant::now();
-
-//    unsafe {
-//        fast_batched_dot_product_avx512::<K, u32>(
-//            &params,
-//            c.as_mut_slice(),
-//            a.as_slice(),
-//            A_ROWS * A_COLS,
-//            b_t.as_slice(),
-//            B_ROWS,
-//            B_COLS,
-//        );
-//    }
-
-    let end = Instant::now();
-    println!("time elapsed: {:?}", end - start);
+	let dec_result = client.decrypt_matrix_reg(&ct_0);
+	let dec_result_raw = dec_result.raw();
+	let mut dec_rescaled = PolyMatrixRaw::zero(&params, 1, 1);
+	for z in 0..dec_rescaled.data.len() {
+	    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
+	}
+	println!("auto result c1 : {:?}", dec_rescaled.as_slice());
     }
+
+    #[test]
+    fn test_query_mult(){
+
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+	let mut params = params_for_scenario(1<<30, 1);
+	params.pt_modulus = 1<<16;
+
+	let mut client = Client::init(&params);
+	//let y_client = YClient::new(&mut client, &params);
+	client.generate_secret_keys();
+	
+	let scale_k = params.modulus / params.pt_modulus;
+
+	println!("instance: {}", params.instances);
+	println!("dimension: {}, {}", params.db_dim_1, params.db_dim_2);
+	let db_rows: usize = 1<<(params.db_dim_1 + params.poly_len_log2);
+	let db_cols: usize = 1<<(params.db_dim_2 + params.poly_len_log2);
+	println!("rows: {}, cols: {}", db_rows, db_cols);
+	let mut rng = rand::thread_rng();
+	
+	let mut matrix = Vec::with_capacity(db_rows * db_cols);
+
+	for i in 0..db_rows{
+	    for j in 0..db_cols{
+		matrix.push((10*i+j) as u16);
+	    }
+	}	
+
+	
+	let server: YServer<u16> = YServer::<u16>::new( // database
+	    &params,
+	    matrix.into_iter(),
+	    false,
+	    true,
+	    false
+	);
+
+	let mut y_client = YClient::new(&mut client, &params);
+
+	let preprocessed_query = server.generate_pseudorandom_query(SEED_1);
+	let pseudo = y_client.generate_query_impl(SEED_1, params.db_dim_1, true, 3);
+	let pseudo_2 = y_client.generate_query_impl(SEED_1, params.db_dim_1, true, 3);
+	//assert_eq!
+
+	println!("length pseudo: {}", pseudo[0].as_slice().len());
+
+	
+	let decrypted = decrypt_ct_reg_measured(&mut y_client.inner, &params, &pseudo[0].ntt(), 0);
+	//println!("auto result c1 : {:?}", decrypted.as_slice());
+
+	let dec_result = y_client.inner.decrypt_matrix_reg(&pseudo[0].ntt());
+	let dec_result_raw = dec_result.raw();
+	let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
+	for z in 0..dec_rescaled.data.len() {
+	    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
+	}
+	//println!("auto result c1 : {:?}", dec_rescaled.as_slice());
+
+	//assert_eq!(preprocessed_query[0].raw().data[1000], pseudo[0].data[1000]);
+
+
+	//println!("length: {}", preprocessed_query.len());
+	//let proprocessed_12 = server.generate_pseudorandom_query(SEED_1);
+	//assert_eq!(preprocessed_query[0].raw().data[15], proprocessed_12[0].raw().data[15]);
+	//println!("{}", preprocessed_query[0].raw().data[1000]);
+
+	let hint = server.answer_hint_ring(SEED_1, db_cols);//db_cols); // hint
+
+	//println!("serverdim: {}", server.params.db_dim_2);
+	//println!("server polylen: {}", server.params.poly_len);
+	//println!("hint_length: {}", hint.as_slice().len());
+
+	//let packed_query_col = query_mlwe_pack(&params, &mut client, 3);
+	
+	let packed_query_col = {
+	    //let y_client = YClient::new(&mut client, &params);
+	    let query_col = y_client.generate_query(SEED_1, params.db_dim_1, true, 15); // query b
+
+	    
+
+	    let mut tmp = PolyMatrixRaw::zero(&params, 2, 1);
+	    //tmp.get_poly_mut(1, 0).copy_from_slice(query_col[0..params.poly_len]);
+	    tmp.get_poly_mut(0, 0).copy_from_slice(preprocessed_query[0].raw().as_slice());
+
+	    for i in 0..params.poly_len{
+		tmp.data[params.poly_len + i] = query_col[i];
+	    }
+
+	    let dec_result = y_client.inner.decrypt_matrix_reg(&tmp.ntt());
+	    let dec_result_raw = dec_result.raw();
+	    let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
+	    for z in 0..dec_rescaled.data.len() {
+	        dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
+	    }
+	    //println!("auto result c1 : {:?}", dec_rescaled.as_slice());
+
+	    //let decrypted_tmp = decrypt_ct_reg_measured(&mut y_client.inner, &params, &tmp.ntt(), 1);
+	    //println!("{:?}", decrypted_tmp.as_slice());
+	  
+	    println!("query_col length: {}", query_col.len());
+	    let query_col_last_row = &query_col[params.poly_len * db_rows..];
+	    println!("query_len: {}", query_col_last_row.len());
+	    let packed_query_col_tmp = pack_query(&params, query_col_last_row); // query b
+	    println!("length : {}", packed_query_col_tmp.as_slice().len());
+	    
+	    
+	    packed_query_col_tmp
+	
+	};
+	//}
+
+	println!("hello");
+
+	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice());//buf.as_slice());
+	println!("response length: {}", response.len());
+
+	let mut ct_vec = Vec::new();
+	for i in 0..response.len(){
+	    let mut ct_result = PolyMatrixRaw::zero(&params, 2, 1);
+	    let mut ct_a_result = PolyMatrixRaw::zero(&params, 1, 1);
+
+	    let mut poly = Vec::new();
+	    for j in 0..params.poly_len{
+		poly.push(hint.as_slice()[j*response.len() + i]);//j*response.len() + i]);
+	    }
+	    let nega = negacyclic_perm(&poly, 0, params.modulus);
+
+	    for j in 0..params.poly_len {
+		ct_result.get_poly_mut(0, 0)[j] = nega[j];
+	    }
+
+	    ct_result.get_poly_mut(1, 0)[0] = response[i] as u64;
+
+	    ct_vec.push(ct_result);
+	}
+	
+	//ct_result.as_mut_slice()[2048..4096].copy_from_slice(ct_b_result.as_slice());
+
+	for i in 0..ct_vec.len(){
+	    let decrypted = decrypt_ct_reg_measured(&mut y_client.inner, &params, &ct_vec[i].ntt(), 0);
+	    //println!("{}", decrypted.as_slice().len());
+	    println!("{}", decrypted.data[0]);
+	    println!("{}", server.db()[i*db_rows+15]);
+	    assert_eq!(decrypted.data[0], server.db()[i*db_rows + 15] as u64);
+	}
+	println!("{}", ct_vec.len());
+
+	//for i in 0..db_cols{
+	    
+	//}
+
+	let dec_result = y_client.inner.decrypt_matrix_reg(&ct_vec[0].ntt());
+	//let dec_result_raw = dec_result.raw();
+	//let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
+	//for z in 0..dec_rescaled.data.len() {
+	//    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
+	//}
+	//println!("auto result c1 : {:?}", dec_rescaled.as_slice());
+	
+	
+    }
+
 }

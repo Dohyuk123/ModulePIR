@@ -65,6 +65,7 @@ pub fn mlwe_to_rlwe_b_combined<'a>(params: &'a Params, mut vector: Vec<u64>, pt_
 }
 
 pub fn rlwe_to_lwe<'a>(params: &'a Params, ct: &PolyMatrixRaw<'a>) -> Vec<u64> {
+    println!("ct: {}", ct.data[1000]);
     let a = ct.get_poly(0, 0);
     let mut negacylic_a = negacyclic_matrix(&a, params.modulus);
     negacylic_a.extend(ct.get_poly(1, 0));
@@ -350,7 +351,7 @@ pub fn decrypt_ct_reg_measured<'a>(
 }
 
 pub struct YClient<'a> {
-    inner: &'a mut Client<'a>,
+    pub inner: &'a mut Client<'a>,  // must erase pub!!!
     params: &'a Params,
     lwe_client: LWEClient,
 }
@@ -424,7 +425,7 @@ impl<'a> YClient<'a> {
         // let db_cols = 1 << (self.params.db_dim_2 + self.params.poly_len_log2);
         // let idx_dim1 = index / db_cols;
 
-        let multiply_ct = true;
+        let multiply_ct = false;//true; // changed!!!!
 
         let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx));
 
@@ -432,7 +433,8 @@ impl<'a> YClient<'a> {
         let mut out = Vec::new();
 
         let scale_k = self.params.modulus / self.params.pt_modulus;
-	println!("encrypt modulus: {}, polylen: {}, scale_k: {}", self.params.modulus, self.params.poly_len, scale_k);
+	println!("scale: {}", scale_k);
+	//println!("encrypt modulus: {}, polylen: {}, scale_k: {}", self.params.modulus, self.params.poly_len, scale_k);
 
         for i in 0..(1 << dim_log2) {
             let mut scalar = PolyMatrixRaw::zero(self.params, 1, 1);
@@ -441,16 +443,17 @@ impl<'a> YClient<'a> {
             if is_nonzero {
                 scalar.data[index % self.params.poly_len] = scale_k;
             }
+	    
 
             if packing {
-		println!("packing: {}", true);
-                let factor =
-                    invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
-                scalar = scalar_multiply_alloc(
-                    &PolyMatrixRaw::single_value(self.params, factor).ntt(),
-                    &scalar.ntt(),
-                )
-                .raw();
+		//println!("packing: {}", true);
+                //let factor =
+                //    invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
+                //scalar = scalar_multiply_alloc(
+                //    &PolyMatrixRaw::single_value(self.params, factor).ntt(),
+                //    &scalar.ntt(),
+                //)
+                //.raw();
             }
 
             // if public_seed_idx == SEED_0 {
@@ -459,7 +462,7 @@ impl<'a> YClient<'a> {
             // }
 
             let ct = if multiply_ct {
-		println!("multiply_ct: {}", true);
+		//println!("multiply_ct: {}", true);
                 let factor =
                     invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
 
@@ -469,7 +472,9 @@ impl<'a> YClient<'a> {
                     &mut rng_pub,
                     factor,
                 )
+
             } else {
+		//println!("encrypt_matrix_reg");
                 self.inner.encrypt_matrix_reg(
                     &scalar.ntt(),
                     &mut ChaCha20Rng::from_entropy(),
@@ -477,29 +482,10 @@ impl<'a> YClient<'a> {
                 )
             };
 
-            // let mut ct = self.inner.encrypt_matrix_reg(
-            //     &scalar.ntt(),
-            //     &mut ChaCha20Rng::from_entropy(),
-            //     &mut rng_pub,
-            // );
+	    let decrypted = decrypt_ct_reg_measured(self.inner, &self.params, &ct, 0);
+	    //println!("auto : {:?}", decrypted.as_slice());
 
-            // if multiply_ct && packing {
-            //     let factor =
-            //         invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
-            //     ct = scalar_multiply_alloc(
-            //         &PolyMatrixRaw::single_value(self.params, factor).ntt(),
-            //         &ct,
-            //     );
-            // };
-
-            // if multiply_error && is_nonzero && packing {
-            //     let factor =
-            //         invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
-            //     ct = scalar_multiply_alloc(
-            //         &PolyMatrixRaw::single_value(self.params, factor).ntt(),
-            //         &ct,
-            //     );
-            // }
+           
 
             let ct_raw = ct.raw();
             // let ct_0_nega = negacyclic_perm(ct_raw.get_poly(0, 0), 0, self.params.modulus);
@@ -565,7 +551,7 @@ impl<'a> YClient<'a> {
             lwes
         } else {
 	    println!("else");
-            let out = self.generate_query_impl(public_seed_idx, dim_log2, packing, index_row);
+            let out = self.generate_query_impl(public_seed_idx, dim_log2, packing, index_row);	
             let lwes = self.rlwes_to_lwes(&out);
             lwes
         }
@@ -663,7 +649,7 @@ impl<'a> NewClient<'a> {
             }
 
             if packing {
-		//println!("packing: {}", true);
+		println!("packing: {}", true);
                 let factor =
                     invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
                 scalar = scalar_multiply_alloc(
@@ -690,6 +676,7 @@ impl<'a> NewClient<'a> {
                     factor,
                 )
             } else {
+	 	println!("multiply_ct: {}", false);
                 self.inner.encrypt_matrix_reg(
                     &scalar.ntt(),
                     &mut ChaCha20Rng::from_entropy(),
@@ -875,10 +862,10 @@ mod test {
 	}	
 	let mut plaintext_2_ntt = plaintext_2.ntt();
 	let mut p = 3;
-	println!("1: {}", params.modulus);
+	//println!("1: {}", params.modulus);
 	//println!("printpoly: {:?}", nega);
-	println!("printlen: {}", plaintext_1.as_slice().len());
-	println!("{:?}", plaintext_2.as_slice()); // how to print
+	//println!("printlen: {}", plaintext_1.as_slice().len());
+	//println!("{:?}", plaintext_2.as_slice()); // how to print
 	//assert_eq!(plaintext_1.as_slice(), plaintext_2.as_slice());
 	
 	//let mut ct = y_client.inner.encrypt_matrix_reg(&plaintext_1.ntt(), &mut ChaCha20Rng::from_entropy(), &mut rng_pub).raw(); //->polymatNTT(2, 1) ->encryption and how to "NTT"
