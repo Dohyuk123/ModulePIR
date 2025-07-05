@@ -3016,33 +3016,9 @@ mod test {
 	let mut dec = decrypt_mlwe(&params, &mlwe_params, &result_a, &result_b.ntt(), &y_client.inner);
 	println!("result: {:?}", dec.as_slice());
 
-/////////////////////multiple////////////////////////
+/////////////////////multiple////////////////////////	
 
-	let mut ct_a_vec_mult = Vec::new();
-	let mut decomp_a_mult = Vec::new();
-	let mut ct_a_polys = PolyMatrixNTT::zero(&mlwe_params, db_cols / mlwe_params.poly_len, dimension);
-	for i in 0..db_cols / mlwe_params.poly_len{
-	    let ct_as = ct_vec_a[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].to_vec();
-	    let (result_a_tmp, decomp_a_vec_tmp) = prep_pack_lwe_to_mlwe(&params, &mlwe_params, dimension, t_exp, &expansion_key_a, &ct_as, &auto_table, &expansion_table_neg, &expansion_table_pos);
-
-	    ct_a_polys.as_mut_slice()[i*params.poly_len*2..(i+1)*params.poly_len*2].copy_from_slice(result_a_tmp.as_slice());
-	    
-	    ct_a_vec_mult.push(result_a_tmp);
-	    decomp_a_mult.push(decomp_a_vec_tmp);
-	}	
-
-	let (result_a_tmps, decomps) = prep_pack_lwes_to_mlwe_db(&params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a, &ct_vec_a, &auto_table, &expansion_table_neg, &expansion_table_pos);
-
-	let mut ct_b_polys = PolyMatrixRaw::zero(&mlwe_params, db_cols / mlwe_params.poly_len, 1);
-	for i in 0..db_cols / mlwe_params.poly_len{
-	    let mut ct_bs = Vec::new();
-	    for j in 0..mlwe_params.poly_len{
-		ct_bs.push(ct_vec_b[i*mlwe_params.poly_len + j].data[0] as u64);
-	    }
-	    let result_b_tmp = pack_lwes_to_mlwe(&params, &mlwe_params, dimension, t_exp, &ct_bs, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, &decomp_a_mult[i]); 
-	    
-	    ct_b_polys.as_mut_slice()[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].copy_from_slice(result_b_tmp.as_slice());
-	}
+	let (result_a_tmps, decomps) = prep_pack_lwes_to_mlwe_db(&params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a,  &auto_table, &expansion_table_neg, &expansion_table_pos);
 
 	let result_b_tmps = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomps);
 
@@ -3092,6 +3068,10 @@ mod test {
 
 	let mut y_client = YClient::new(&mut client, &params);
 
+	//let g_exp = build_gadget(&mlwe_params, 1, 4); // for gadget decomposition
+	
+	
+
 	////////////////////////////for keyswitching///////////////////
 	let t_exp = params.t_exp_left;
 	let auto_table = generate_automorph_tables_brute_force(&mlwe_params); //automorphism table for mlwe
@@ -3108,22 +3088,41 @@ mod test {
 
 	let hint = server.answer_hint_ring(SEED_1, db_cols);
 
-	let mut ct_vec_a = Vec::new();
-	for i in 0..db_rows{
-	    let mut ct_a_result = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
-	    let mut poly = Vec::new();
-	    for j in 0..params.poly_len {
-		poly.push(hint.as_slice()[j*db_cols + i]);
-	    }
-	
-	    let nega = negacyclic_perm(&poly, 0, params.modulus);
-	    let mlwe_a = rlwe_to_mlwe_a(&params, &nega, mlwe_params.poly_len_log2);
-	
-	    for j in 0..params.poly_len {
-		ct_a_result.data[j] = mlwe_a[j];
-	    }
+	let (result_a_tmps, decomp_a) = prep_pack_lwes_to_mlwe_db(&params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a, &auto_table, &expansion_table_neg, &expansion_table_pos);
 
-	    ct_vec_a.push(ct_a_result.ntt());
-	}
+	let result_a_simple_raw = result_a_tmps.raw();
+	
+
+	///////////////////////////////////////////////////////////////
+	//////////////////////query////////////////////////////////////
+
+
+
+	let packed_query_col = { // create query
+
+	    let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, 15); // query b -> b part
+	    let query_col_last_row = &query_col[params.poly_len * db_rows..];
+	    let packed_query_col_tmp = pack_query(&params, query_col_last_row); // query b
+	    
+	    packed_query_col_tmp
+	
+	};
+
+	let start = Instant::now();
+
+	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice()); // response
+
+	let result_b_tmps = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
+
+	let end = Instant::now();
+
+	println!("time: {:?}", end - start);
+
+	//let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &result_a_tmps, &result_b_tmps.ntt(), &y_client.inner);
+
+	//for i in 0..decrypted.len() {
+	    //println!("{:?}", decrypted[i].as_slice());
+	//}
+
     }
 }

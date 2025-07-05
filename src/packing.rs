@@ -526,7 +526,7 @@ pub fn prep_pack_lwes_to_mlwe_db<'a>(
     dimension : usize,
     t_exp: usize,
     expansion_key: &[PolyMatrixNTT<'a>],
-    ct_a_vec : &[PolyMatrixNTT<'a>],
+    //ct_a_vec : &[PolyMatrixNTT<'a>],
     auto_table: &[Vec<usize>],
     expansion_table_neg: &[PolyMatrixNTT<'a>],
     expansion_table_pos: &[PolyMatrixNTT<'a>],
