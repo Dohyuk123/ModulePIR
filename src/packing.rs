@@ -519,6 +519,19 @@ pub fn create_expansion_table<'a>(
     table_vec
 }
 
+pub fn create_expansion_table_pos<'a>(
+    params: &'a Params,
+    pt_byte_log: usize,
+) -> Vec<PolyMatrixNTT<'a>> {
+    let mut table_vec = Vec::new();
+    for i in 0..params.poly_len_log2 {
+	let mut plain_mult = PolyMatrixRaw::zero(&params, 1, 1);
+	plain_mult.data[params.poly_len - (1<<i)] = 1;
+	table_vec.push(plain_mult.ntt());
+    }
+    table_vec
+}
+
 pub fn query_expansion_table<'a>(
     params: &'a Params,
     pt_byte_log: usize,
@@ -828,10 +841,11 @@ fn pack_lwes_inner_non_recursive<'a>(
     working_set[0].clone()
 }
 
-pub fn precompute_pack_mlwe<'a>(
+
+pub fn precompute_pack_mlwe_to_rlwe<'a>(
     params: &'a Params,
-    mlwe_len_log2: usize,
-    ell: usize,
+    ell: usize, // poly_len_log2
+    mlwe_byte_log2: usize,
     rlwe_cts: &[PolyMatrixNTT<'a>],
     fake_pub_params: &[PolyMatrixNTT<'a>],
     y_constants: &(Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>),
@@ -864,7 +878,7 @@ pub fn precompute_pack_mlwe<'a>(
 
     let mut res = Vec::new();
 
-    for cur_ell in (mlwe_len_log2+1)..=ell {
+    for cur_ell in (mlwe_byte_log2+1)..=ell {
 	//println!("hi");
         let num_in = 1 << (ell - cur_ell + 1);
         let num_out = num_in >> 1;
@@ -980,10 +994,10 @@ pub fn precompute_pack_mlwe<'a>(
     (working_set[0].clone(), res, tables)
 }
 
-pub fn pack_using_precomp_vals_mlwe<'a>(
+pub fn pack_using_precomp_vals_mlwe_to_rlwe<'a>(
     params: &'a Params,
     ell: usize,
-    mlwe_len_log2: usize,
+    mlwe_byte_log2: usize,
     pub_params: &[PolyMatrixNTT<'a>],
     b_values: &[u64],
     precomp_res: &PolyMatrixNTT<'a>,
@@ -1013,7 +1027,7 @@ pub fn pack_using_precomp_vals_mlwe<'a>(
 
     let mut idx_precomp = 0;
     let mut num_muls = 0;
-    for cur_ell in (mlwe_len_log2+1)..=ell {
+    for cur_ell in (mlwe_byte_log2+1)..=ell {
         let mut num_in = 1 << (ell - cur_ell + 1);
         let num_out = num_in >> 1;
 
@@ -1133,7 +1147,7 @@ pub fn pack_using_precomp_vals_mlwe<'a>(
 
     let mut out_raw = res.raw();
     for z in 0..params.poly_len {
-        let val = barrett_reduction_u128(params, b_values[z] as u128 * params.poly_len as u128);
+        let val = barrett_reduction_u128(params, b_values[z] as u128 * (1<<params.poly_len_log2 - mlwe_byte_log2) as u128);
         let idx = params.poly_len + z;
         out_raw.data[idx] += val;
         if out_raw.data[idx] >= params.modulus {
@@ -1151,6 +1165,8 @@ pub fn pack_using_precomp_vals_mlwe<'a>(
 
     out
 }
+
+
 
 pub fn precompute_pack<'a>(
     params: &'a Params,
@@ -1302,6 +1318,8 @@ pub fn precompute_pack<'a>(
 
     (working_set[0].clone(), res, tables)
 }
+
+
 
 pub fn pack_using_precomp_vals<'a>(
     params: &'a Params,
@@ -3397,36 +3415,120 @@ mod test {
 		
 	
     }
-
-    fn test_mlwe_packing(){
+    #[test]
+    fn test_mlwe_to_rlwe_packing(){
 	let params = params_for_scenario(1<<30, 1);
-	let pt_byte_log2 = 8;
-//	let mut params = param_for_scenario(1<<30, 1);
 
-	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len = 1<<pt_byte_log2;
-	mlwe_params.poly_len_log2 = pt_byte_log2;
+	let pt_byte_log2 = 7;
+	let pt_byte = 1<<pt_byte_log2;
+	let dimension = params.poly_len / pt_byte;
 	let mut client = Client::init(&params);
 	client.generate_secret_keys();
+	let y_constants = generate_y_constants(&params);
 
-	let y_constant = generate_y_constants(&params);
+        let pack_seed = [1u8; 32];
+        let cts_seed = [2u8; 32];
+        let mut ct_pub_rng = ChaCha20Rng::from_seed(cts_seed);
 
-	let scale_k = params.modulus / params.pt_modulus;
+        let pack_pub_params = raw_generate_expansion_params(
+            &params,
+            client.get_sk_reg(),
+            params.poly_len_log2,
+            params.t_exp_left,
+            &mut ChaCha20Rng::from_entropy(),
+            &mut ChaCha20Rng::from_seed(pack_seed),
+        );
 
-	let pack_seed = [1u8; 32];
-	let cts_seed = [2u8; 32];
-	let mut ct_pub_rng = ChaCha20Rng::from_seed(cts_seed);
+        let mut fake_pack_pub_params = pack_pub_params.clone();
+        // zero out all of the second rows
+        for i in 0..pack_pub_params.len() {
+            for col in 0..pack_pub_params[i].cols {
+                fake_pack_pub_params[i].get_poly_mut(1, col).fill(0);
+            }
+        }
 
-	let pack_pub_params = raw_generate_expansion_params(&params, client.get_sk_reg(), params.poly_len_log2 - mlwe_params.poly_len_log2, params.t_exp_left, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed),);
+        let mut pack_pub_params_row_1s = pack_pub_params.clone();
+        for i in 0..pack_pub_params.len() {
+            pack_pub_params_row_1s[i] =
+                pack_pub_params[i].submatrix(1, 0, 1, pack_pub_params[i].cols);
+            pack_pub_params_row_1s[i] = condense_matrix(&params, &pack_pub_params_row_1s[i]);
+        }
 
-	let mut fake_pack_pub_params = pack_pub_params.clone();
-
-	for i in 0..pack_pub_params.len() {
-	    for col in 0..pack_pub_params[i].cols {
-		fake_pack_pub_params[i].get_poly_mut(1, col).fill(0);
+	//generate ciphertexts
+	let mut v_ct = Vec::new();
+        let mut b_values = Vec::new();
+	let mut b_poly = PolyMatrixRaw::zero(&params, 1, 1);
+	for i in 0..dimension{
+	    let mut plaintext = PolyMatrixRaw::zero(&params, 1, 1);
+	    let scale_k = params.modulus / params.pt_modulus;
+	    let mod_inv = invert_uint_mod(1<<(params.poly_len_log2 - pt_byte_log2) as u64, params.modulus).unwrap();
+	    for j in 0..pt_byte{
+		let val = (j*dimension + i) as u64;
+		println!("{}", val);
+		let val_to_enc = multiply_uint_mod(val * scale_k, mod_inv, params.modulus);
+		plaintext.data[j*dimension] = val_to_enc;
 	    }
+
+	    let ct = client.encrypt_matrix_reg(
+	        &plaintext.ntt(),
+	        &mut ChaCha20Rng::from_entropy(),
+	        &mut ct_pub_rng,
+	    );
+	    let mut ct_raw = ct.raw();
+	    for j in 0..pt_byte{
+		b_poly.as_mut_slice()[j*dimension + i] = ct_raw.get_poly(1, 0)[j*dimension];
+	    }
+	    ct_raw.get_poly_mut(1, 0).fill(0);
+	    v_ct.push(ct_raw.ntt());
+
 	}
 
+	for i in 0..params.poly_len{
+	    b_values.push(b_poly.as_slice()[i]);
+	}
+
+	let (precomp_res, precomp_vals, precomp_tables) = precompute_pack_mlwe_to_rlwe(
+	    &params,
+	    params.poly_len_log2,
+	    pt_byte_log2,
+	    &v_ct,
+	    &fake_pack_pub_params,
+	    &y_constants,
+	);
+
+	let packed = pack_using_precomp_vals_mlwe_to_rlwe(
+	    &params,
+	    params.poly_len_log2,
+	    pt_byte_log2,
+	    &pack_pub_params_row_1s,
+	    &b_values,
+	    &precomp_res,
+	    &precomp_vals,
+	    &precomp_tables,
+	    &y_constants,
+	);
+	
+	let packed_raw = packed.raw();
+        println!("packed_0: {:?}", &packed_raw.get_poly(0, 0)[..10]);
+        // assert_eq!(packed_raw.get_poly(0, 0)[0], 17210016925609510u64);
+
+        // decrypt + decode
+        let dec = client.decrypt_matrix_reg(&packed);
+        let dec_raw = dec.raw();
+
+        // rescale
+        let mut rescaled = PolyMatrixRaw::zero(&params, 1, 1);
+        for i in 0..params.poly_len {
+            rescaled.data[i] = rescale(dec_raw.data[i], params.modulus, params.pt_modulus);
+        }
+
+        println!("rescaled: {:?}", &rescaled.as_slice());//[..50]);
+        let mut gold = PolyMatrixRaw::zero(&params, 1, 1);
+        for i in 0..params.poly_len {
+            gold.data[i] = i as u64 % params.pt_modulus;
+        }
+	
+	
     }
 }
 

@@ -2958,8 +2958,8 @@ mod test {
 	for i in 0..ct_vec.len(){
 	    let decrypted = decrypt_ct_reg_measured(&mut y_client.inner, &params, &ct_vec[i].ntt(), 0);
 	    //println!("{}", decrypted.as_slice().len());
-	    println!("{}", decrypted.data[0]);
-	    println!("{}", server.db()[i*db_rows+15]);
+	    //println!("{}", decrypted.data[0]);
+	    //println!("{}", server.db()[i*db_rows+15]);
 	    assert_eq!(decrypted.data[0], server.db()[i*db_rows + 15] as u64);
 	}
 	println!("{}", ct_vec.len());
