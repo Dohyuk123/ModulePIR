@@ -61,6 +61,28 @@ fn mlwe_automorph_b<'a>(
     ct_auto
 }
 
+fn mlwe_automorph_b_for_packing<'a>(
+    mlwe_params: &'a Params,
+    t: usize,
+    //dimension : usize,
+    t_exp: usize,
+    //ct_b: &PolyMatrixNTT<'a>,
+    decomp_a: &PolyMatrixNTT<'a>,
+    pub_param: &PolyMatrixNTT<'a>,
+    //table: &[Vec<usize>],
+) -> PolyMatrixNTT<'a> {
+
+    //let mut ct_auto = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
+    //apply_automorph_ntt(&mlwe_params, &table, &ct_b, &mut ct_auto, t);
+
+    let mut key_switch_b = PolyMatrix::zero(mlwe_params, 1, 1);
+    multiply_no_reduce(&mut key_switch_b, &decomp_a, &pub_param, 0);
+
+    //fast_add_into_no_reduce(&mut ct_auto, &key_switch_b);
+
+    key_switch_b
+}
+
 fn query_expansion_mlwe_a<'a>(
     mlwe_params: &'a Params,
     dimension : usize,
@@ -314,7 +336,6 @@ fn homomorphic_automorph_b<'a>(
     &ct_auto.ntt() + &w_times_ginv_ct_b // b + aB
 }
 
-
 fn homomorphic_automorph_b_table<'a>(
     params: &'a Params,
     t: usize,
@@ -329,11 +350,7 @@ fn homomorphic_automorph_b_table<'a>(
     apply_automorph_ntt(&params, &table, &ct, &mut ct_auto, t);
     
     let mut w_times_ginv_ct_b = PolyMatrixNTT::zero(params, 1, 1);// = pub_param * &ginv_ct_ntt; // B part * a part decomp
-    //println!("{} {} {} {} {} {}", params.crt_count, params.poly_len, pub_param.get_rows(), pub_param.get_cols(), ginv_ct_ntt.get_rows(), ginv_ct_ntt.get_cols());
-
-    //let mut res = condense_matrix(params, &ginv_ct_ntt);
-
-    //fast_multiply_no_reduce(params, &mut w_times_ginv_ct_b, &pub_param, &ginv_ct_ntt, 0);
+    
     multiply_no_reduce(&mut w_times_ginv_ct_b, &pub_param, &ginv_ct_ntt, 0);
     
     fast_add_into_no_reduce(&mut ct_auto, &w_times_ginv_ct_b);
@@ -385,6 +402,211 @@ fn homomorphic_automorph_b_slice<'a>(
 //	}
 //    }
 //}
+
+pub fn create_packing_table_mlwe_pos<'a>(
+    params: &'a Params,
+) -> Vec<PolyMatrixNTT<'a>> {
+    let mut table_vec = Vec::new();
+    for i in 0..params.poly_len_log2 {
+	let mut plain_mult = PolyMatrixRaw::zero(&params, 1, 1);
+	plain_mult.data[params.poly_len>>(i+1)] = 1; // 1024 512 256 ... 1
+	table_vec.push(plain_mult.ntt());
+    }
+    table_vec
+}
+
+pub fn create_packing_table_mlwe_neg<'a>(
+    params: &'a Params,
+) -> Vec<PolyMatrixNTT<'a>> {
+    let mut table_vec = Vec::new();
+    for i in 0..params.poly_len_log2 {
+	let mut plain_mult = PolyMatrixRaw::zero(&params, 1, 1);
+	plain_mult.data[params.poly_len>>(i+1)] = params.modulus - 1; // 1024 512 256 ... 1
+	table_vec.push(plain_mult.ntt());
+    }
+
+    table_vec
+}
+
+pub fn prep_pack_lwe_to_mlwe<'a>(
+    params: &'a Params,
+    mlwe_params: &'a Params,
+    dimension: usize, 
+    t_exp: usize,
+    pub_params: &[PolyMatrixNTT<'a>],
+    mlwe_a_to_pack: &[PolyMatrixNTT<'a>],
+    auto_table: &[Vec<usize>],
+    expansion_table_neg: &[PolyMatrixNTT<'a>],
+    expansion_table_pos: &[PolyMatrixNTT<'a>],
+) -> (PolyMatrixNTT<'a>, Vec<PolyMatrixNTT<'a>>){
+    let mut pos_times_ct_odd = PolyMatrixNTT::zero(mlwe_params, 1, dimension);
+    let mut neg_times_ct_odd = PolyMatrixNTT::zero(mlwe_params, 1, dimension);
+    let mut ct_sum_1 = PolyMatrixNTT::zero(mlwe_params, 1, dimension);
+    let mut decomp_a_vec = Vec::new();
+
+    let mut working_set = mlwe_a_to_pack.to_vec();
+
+    let ell = mlwe_params.poly_len_log2;
+
+    for cur_ell in 1..=ell{ // 1, 2, 3, 4, 5, 6, 7
+	let num_in = 1 << (ell - cur_ell + 1); // 128 64 32, 16, 8 4 2 
+	let num_out = num_in >> 1; // 64 32 16 8 4 2 1
+
+	let (first_half, second_half) = (&mut working_set[..num_in]).split_at_mut(num_out);
+
+	let neg = &expansion_table_neg[cur_ell - 1]; // 128, 64, 32, 16, 8, 4, 2, 1
+	let pos = &expansion_table_pos[cur_ell - 1];	
+
+	for i in 0..num_out {
+	    let ct_even = &mut first_half[i];
+	    let ct_odd = &second_half[i];
+
+	    scalar_multiply_avx(&mut pos_times_ct_odd, &pos, &ct_odd);
+	    scalar_multiply_avx(&mut neg_times_ct_odd, &neg, &ct_odd);
+
+	    ct_sum_1.as_mut_slice().copy_from_slice(ct_even.as_slice());
+
+	    add_into(&mut ct_sum_1, &neg_times_ct_odd); //even - odd * 1024
+	    add_into(ct_even, &pos_times_ct_odd); // even + odd * 1024
+ 	    
+
+	    let (decomp_a, mut ct_result_a) = mlwe_automorph_a(mlwe_params, (1<<cur_ell)+1, dimension, t_exp, &ct_sum_1, &pub_params[mlwe_params.poly_len_log2 - cur_ell], &auto_table);//2^1+1, 2^2+1, ..., 2^7+1 // 6 5 4 3 2 1 0
+	    decomp_a_vec.push(decomp_a);
+
+	    add_into(ct_even, &ct_result_a);
+	}
+    }
+    (working_set[0].clone(), decomp_a_vec)
+}
+
+pub fn pack_lwes_to_mlwe_tmp<'a>(
+    mlwe_params: &'a Params,
+    dimension : usize,
+    t_exp: usize, 
+    //mlwe_a_to_pack: &[PolyMatrixNTT<'a>],
+    working_set: &mut [PolyMatrixNTT<'a>],
+    pub_param: &[PolyMatrixNTT<'a>],
+    auto_table: &[Vec<usize>],
+    expansion_table_neg: &[PolyMatrixNTT<'a>],
+    expansion_table_pos: &[PolyMatrixNTT<'a>],
+    decomp_a_vec : &[PolyMatrixNTT<'a>],
+) -> PolyMatrixNTT<'a> {
+    let mut pos_times_ct_odd = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
+    let mut neg_times_ct_odd = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
+    let mut ct_sum_1 = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
+    //let mut decomp_a_vec = Vec::new();
+
+    //let mut working_set = Vec::new();
+    //for i in 0..mlwe_params.poly_len{
+	//working_set.push(PolyMatrixNTT::zero(&mlwe_params, 1, 1));
+    //}
+
+    let ell = mlwe_params.poly_len_log2;
+
+    let mut index = 0;
+
+    for cur_ell in 1..=ell{ // 1, 2, 3, 4, 5, 6, 7
+	let num_in = 1 << (ell - cur_ell + 1); // 128 64 32, 16, 8 4 2 
+	let num_out = num_in >> 1; // 64 32 16 8 4 2 1
+
+	let (first_half, second_half) = (&mut working_set[..num_in]).split_at_mut(num_out);
+
+	let neg = &expansion_table_neg[cur_ell - 1]; // 128, 64, 32, 16, 8, 4, 2, 1
+	let pos = &expansion_table_pos[cur_ell - 1];	
+
+	for i in 0..num_out {
+	    let ct_even = &mut first_half[i];
+	    let ct_odd = &second_half[i];
+
+	    scalar_multiply_avx(&mut pos_times_ct_odd, &pos, &ct_odd);
+	    scalar_multiply_avx(&mut neg_times_ct_odd, &neg, &ct_odd);
+
+	    ct_sum_1.as_mut_slice().copy_from_slice(ct_even.as_slice());
+
+	    add_into(&mut ct_sum_1, &neg_times_ct_odd); //even - odd * 1024
+	    add_into(ct_even, &pos_times_ct_odd); // even + odd * 1024
+ 	    
+	    let mut ct_result_b = mlwe_automorph_b(&mlwe_params, (1<<cur_ell)+1, dimension, t_exp, &ct_sum_1, &decomp_a_vec[index], &pub_param[mlwe_params.poly_len_log2 - cur_ell], &auto_table);
+
+	    //let mut ct_result_b = mlwe_automorph_b_for_packing(&mlwe_params, (1<<cur_ell)+1, t_exp, &decomp_a_vec[index], &pub_param[mlwe_params.poly_len_log2 - cur_ell]);//2^1+1, 2^2+1, ..., 2^7+1 // 6 5 4 3 2 1 0
+	    index = index + 1;
+
+	    add_into(ct_even, &ct_result_b);
+	}
+    }
+    let mut res = working_set[0].clone();
+    
+    res
+}
+
+pub fn pack_lwes_to_mlwe<'a>(
+    mlwe_params: &'a Params,
+    dimension : usize,
+    t_exp: usize, 
+    //mlwe_a_to_pack: &[PolyMatrixNTT<'a>],
+    ct_b: &PolyMatrixRaw<'a>,
+    pub_param: &[PolyMatrixNTT<'a>],
+    //auto_table: &[Vec<usize>],
+    expansion_table_neg: &[PolyMatrixNTT<'a>],
+    expansion_table_pos: &[PolyMatrixNTT<'a>],
+    decomp_a_vec : &[PolyMatrixNTT<'a>],
+) -> PolyMatrixNTT<'a> {
+    let mut pos_times_ct_odd = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
+    let mut neg_times_ct_odd = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
+    let mut ct_sum_1 = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
+    //let mut decomp_a_vec = Vec::new();
+
+    let mut working_set = Vec::new();
+    for i in 0..mlwe_params.poly_len{
+	working_set.push(PolyMatrixNTT::zero(&mlwe_params, 1, 1));
+    }
+
+    let ell = mlwe_params.poly_len_log2;
+
+    let mut index = 0;
+
+    for cur_ell in 1..=ell{ // 1, 2, 3, 4, 5, 6, 7
+	let num_in = 1 << (ell - cur_ell + 1); // 128 64 32, 16, 8 4 2 
+	let num_out = num_in >> 1; // 64 32 16 8 4 2 1
+
+	let (first_half, second_half) = (&mut working_set[..num_in]).split_at_mut(num_out);
+
+	let neg = &expansion_table_neg[cur_ell - 1]; // 128, 64, 32, 16, 8, 4, 2, 1
+	let pos = &expansion_table_pos[cur_ell - 1];	
+
+	for i in 0..num_out {
+	    let ct_even = &mut first_half[i];
+	    let ct_odd = &second_half[i];
+
+	    scalar_multiply_avx(&mut pos_times_ct_odd, &pos, &ct_odd);
+	    scalar_multiply_avx(&mut neg_times_ct_odd, &neg, &ct_odd);
+
+	    ct_sum_1.as_mut_slice().copy_from_slice(ct_even.as_slice());
+
+	    add_into(&mut ct_sum_1, &neg_times_ct_odd); //even - odd * 1024
+	    add_into(ct_even, &pos_times_ct_odd); // even + odd * 1024
+ 	    
+
+	    let mut ct_result_b = mlwe_automorph_b_for_packing(&mlwe_params, (1<<cur_ell)+1, t_exp, &decomp_a_vec[index], &pub_param[mlwe_params.poly_len_log2 - cur_ell]);//2^1+1, 2^2+1, ..., 2^7+1 // 6 5 4 3 2 1 0
+	    index = index + 1;
+
+	    add_into(ct_even, &ct_result_b);
+	}
+    }
+    let mut res = working_set[0].clone();
+    println!("working: {:?}", working_set[0].raw().as_slice());
+
+    let mut result_poly = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
+    for z in 0..mlwe_params.poly_len{
+	let val = barrett_reduction_u128(&mlwe_params, ct_b.data[z] as u128 * mlwe_params.poly_len as u128);
+	result_poly.data[z] = val;
+	if result_poly.data[z] >= mlwe_params.modulus {
+	    result_poly.data[z] -= mlwe_params.modulus;
+	}
+    }
+    let final_result = &res + &result_poly.ntt();
+    final_result
+}
 
 pub fn prep_query_expansion<'a>(
     params: &'a Params,
@@ -3507,6 +3729,7 @@ mod test {
 	    &precomp_tables,
 	    &y_constants,
 	);
+
 	
 	let packed_raw = packed.raw();
         println!("packed_0: {:?}", &packed_raw.get_poly(0, 0)[..10]);

@@ -414,6 +414,133 @@ impl<'a> YClient<'a> {
             .collect::<Vec<_>>();
         concat_horizontal(&v, self.params.poly_len + 1, self.params.poly_len)
     }
+    
+    pub fn generate_query_impl_mlwe(
+        &self,
+        public_seed_idx: u8,
+        dim_log2: usize,
+        packing: bool,
+	pt_byte_log2: usize,
+        index: usize,
+    ) -> Vec<PolyMatrixRaw<'a>> {
+        // let db_cols = 1 << (self.params.db_dim_2 + self.params.poly_len_log2);
+        // let idx_dim1 = index / db_cols;
+
+        let multiply_ct = false;//true; // changed!!!!
+
+        let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx));
+
+        // Generate dim1_bits LWE samples under public randomness
+        let mut out = Vec::new();
+
+        let scale_k = self.params.modulus / self.params.pt_modulus;
+	println!("scale: {}", scale_k);
+	//println!("encrypt modulus: {}, polylen: {}, scale_k: {}", self.params.modulus, self.params.poly_len, scale_k);
+
+        for i in 0..(1 << dim_log2) {
+            let mut scalar = PolyMatrixRaw::zero(self.params, 1, 1);
+            let is_nonzero = i == (index / self.params.poly_len);
+
+            if is_nonzero {
+                scalar.data[index % self.params.poly_len] = scale_k;
+            }
+	    
+
+            if packing {
+		//println!("packing: {}", true);
+                let factor =
+                    invert_uint_mod(1<<(pt_byte_log2) as u64, self.params.modulus).unwrap();
+                scalar = scalar_multiply_alloc(
+                    &PolyMatrixRaw::single_value(self.params, factor).ntt(),
+                    &scalar.ntt(),
+                )
+                .raw();
+            }
+
+            // if public_seed_idx == SEED_0 {
+            //     out.push(scalar.pad_top(1));
+            //     continue;
+            // }
+
+            let ct = if multiply_ct {
+		//println!("multiply_ct: {}", true);
+                let factor =
+                    invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
+
+                self.inner.encrypt_matrix_scaled_reg(
+                    &scalar.ntt(),
+                    &mut ChaCha20Rng::from_entropy(),
+                    &mut rng_pub,
+                    factor,
+                )
+
+            } else {
+		//println!("encrypt_matrix_reg");
+                self.inner.encrypt_matrix_reg(
+                    &scalar.ntt(),
+                    &mut ChaCha20Rng::from_entropy(),
+                    &mut rng_pub,
+                )
+            };
+
+	    let decrypted = decrypt_ct_reg_measured(self.inner, &self.params, &ct, 0);
+	    //println!("auto : {:?}", decrypted.as_slice());
+
+           
+
+            let ct_raw = ct.raw();
+
+            out.push(ct_raw);
+        }
+
+        out
+    }
+
+    pub fn generate_query_mlwe(
+        &self,
+        public_seed_idx: u8,
+        dim_log2: usize,
+	pt_byte_log2: usize,
+        packing: bool,
+        index_row: usize,
+    ) -> Vec<u64> {
+        if public_seed_idx == SEED_0 && !packing {
+	    println!("packing");
+            let lwe_params = LWEParams::default();
+            let dim = 1 << (dim_log2 + self.params.poly_len_log2);
+
+            // lwes must be (n + 1) x (dim) matrix
+            let mut lwes = vec![0u64; (lwe_params.n + 1) * dim];
+
+            let scale_k = lwe_params.scale_k() as u32;
+            let mut vals_to_encrypt = vec![0u32; dim];
+            vals_to_encrypt[index_row] = scale_k;
+
+            let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx));
+
+            for i in (0..dim).step_by(lwe_params.n) {
+                let out = self
+                    .lwe_client
+                    .encrypt_many(&mut rng_pub, &vals_to_encrypt[i..i + lwe_params.n])
+                    .iter()
+                    .map(|x| *x as u64)
+                    .collect::<Vec<_>>();
+                assert_eq!(out.len(), (lwe_params.n + 1) * lwe_params.n);
+                for r in 0..lwe_params.n + 1 {
+                    for c in 0..lwe_params.n {
+                        lwes[r * dim + i + c] = out[r * lwe_params.n + c];
+                    }
+                }
+            }
+
+            lwes
+        } else {
+	    println!("else");
+            let out = self.generate_query_impl_mlwe(public_seed_idx, dim_log2, packing, pt_byte_log2, index_row);	
+            let lwes = self.rlwes_to_lwes(&out);
+            lwes
+        }
+    }
 
     pub fn generate_query_impl(
         &self,

@@ -2662,7 +2662,7 @@ mod test {
     fn test_mlwe_a() {
 	let mut params = get_test_params();
 	let mut mlwe_params = params.clone();
-	let mlwe_bit = 1;
+	let mlwe_bit = 3;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
 	params.poly_len_log2 = 5;
@@ -2676,9 +2676,6 @@ mod test {
 	}
 
 	let mut mlwe = rlwe_to_mlwe_a(&params, &poly.as_slice().to_vec(), mlwe_bit);
-	//println!("{:?}", mlwe);
-
-	//println!("modulus: {}", params.modulus);
 
 	let mut mlwe_result = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, 1);
 	mlwe_result.as_mut_slice().copy_from_slice(&mlwe[0..params.poly_len]);
@@ -2696,7 +2693,7 @@ mod test {
     fn test_mlwe_b() {
 	let mut params = get_test_params();
 	let mut mlwe_params = params.clone();
-	let mlwe_bit = 1;
+	let mlwe_bit = 2;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
 	params.poly_len_log2 = 4;
@@ -2859,79 +2856,22 @@ mod test {
 	let preprocessed_query = server.generate_pseudorandom_query(SEED_1);
 	let pseudo = y_client.generate_query_impl(SEED_1, params.db_dim_1, true, 3);
 	let pseudo_2 = y_client.generate_query_impl(SEED_1, params.db_dim_1, true, 3);
-	//assert_eq!
-
-	println!("length pseudo: {}", pseudo[0].as_slice().len());
-
-	
-	let decrypted = decrypt_ct_reg_measured(&mut y_client.inner, &params, &pseudo[0].ntt(), 0);
-	//println!("auto result c1 : {:?}", decrypted.as_slice());
-
-	let dec_result = y_client.inner.decrypt_matrix_reg(&pseudo[0].ntt());
-	let dec_result_raw = dec_result.raw();
-	let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
-	for z in 0..dec_rescaled.data.len() {
-	    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
-	}
-	//println!("auto result c1 : {:?}", dec_rescaled.as_slice());
-
-	//assert_eq!(preprocessed_query[0].raw().data[1000], pseudo[0].data[1000]);
 
 
-	//println!("length: {}", preprocessed_query.len());
-	//let proprocessed_12 = server.generate_pseudorandom_query(SEED_1);
-	//assert_eq!(preprocessed_query[0].raw().data[15], proprocessed_12[0].raw().data[15]);
-	//println!("{}", preprocessed_query[0].raw().data[1000]);
-
-	let hint = server.answer_hint_ring(SEED_1, db_cols);//db_cols); // hint
-
-	//println!("serverdim: {}", server.params.db_dim_2);
-	//println!("server polylen: {}", server.params.poly_len);
-	//println!("hint_length: {}", hint.as_slice().len());
-
-	//let packed_query_col = query_mlwe_pack(&params, &mut client, 3);
+	let hint = server.answer_hint_ring(SEED_1, db_cols);//db_cols); // hint -> a part
 	
 	let packed_query_col = {
-	    //let y_client = YClient::new(&mut client, &params);
-	    let query_col = y_client.generate_query(SEED_1, params.db_dim_1, true, 15); // query b
-
 	    
+	    let query_col = y_client.generate_query(SEED_1, params.db_dim_1, true, 15); // query b -> b part
 
-	    let mut tmp = PolyMatrixRaw::zero(&params, 2, 1);
-	    //tmp.get_poly_mut(1, 0).copy_from_slice(query_col[0..params.poly_len]);
-	    tmp.get_poly_mut(0, 0).copy_from_slice(preprocessed_query[0].raw().as_slice());
-
-	    for i in 0..params.poly_len{
-		tmp.data[params.poly_len + i] = query_col[i];
-	    }
-
-	    let dec_result = y_client.inner.decrypt_matrix_reg(&tmp.ntt());
-	    let dec_result_raw = dec_result.raw();
-	    let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
-	    for z in 0..dec_rescaled.data.len() {
-	        dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
-	    }
-	    //println!("auto result c1 : {:?}", dec_rescaled.as_slice());
-
-	    //let decrypted_tmp = decrypt_ct_reg_measured(&mut y_client.inner, &params, &tmp.ntt(), 1);
-	    //println!("{:?}", decrypted_tmp.as_slice());
-	  
-	    println!("query_col length: {}", query_col.len());
 	    let query_col_last_row = &query_col[params.poly_len * db_rows..];
-	    println!("query_len: {}", query_col_last_row.len());
 	    let packed_query_col_tmp = pack_query(&params, query_col_last_row); // query b
-	    println!("length : {}", packed_query_col_tmp.as_slice().len());
-	    
 	    
 	    packed_query_col_tmp
 	
 	};
-	//}
-
-	println!("hello");
 
 	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice());//buf.as_slice());
-	println!("response length: {}", response.len());
 
 	let mut ct_vec = Vec::new();
 	for i in 0..response.len(){
@@ -2953,29 +2893,135 @@ mod test {
 	    ct_vec.push(ct_result);
 	}
 	
-	//ct_result.as_mut_slice()[2048..4096].copy_from_slice(ct_b_result.as_slice());
-
-	for i in 0..ct_vec.len(){
+	for i in 0..128{
 	    let decrypted = decrypt_ct_reg_measured(&mut y_client.inner, &params, &ct_vec[i].ntt(), 0);
-	    //println!("{}", decrypted.as_slice().len());
 	    //println!("{}", decrypted.data[0]);
-	    //println!("{}", server.db()[i*db_rows+15]);
 	    assert_eq!(decrypted.data[0], server.db()[i*db_rows + 15] as u64);
 	}
 	println!("{}", ct_vec.len());
 
-	//for i in 0..db_cols{
-	    
-	//}
-
-	let dec_result = y_client.inner.decrypt_matrix_reg(&ct_vec[0].ntt());
-	//let dec_result_raw = dec_result.raw();
-	//let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result_raw.rows, dec_result_raw.cols);
-	//for z in 0..dec_rescaled.data.len() {
-	//    dec_rescaled.data[z] = rescale(dec_result_raw.data[z], params.modulus, params.pt_modulus);
-	//}
-	//println!("auto result c1 : {:?}", dec_rescaled.as_slice());
 	
+    }
+
+    #[test]
+    fn test_packing_lwe_to_mlwe(){
+
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+	let mut params = params_for_scenario(1<<30, 1);
+	params.pt_modulus = 1<<16;
+
+	let mut mlwe_params = params.clone(); // create mlwe parameter
+	mlwe_params.poly_len_log2 = 7;
+	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
+	let dimension = params.poly_len / mlwe_params.poly_len; // dimension
+
+	let mut client = Client::init(&params);
+	
+	client.generate_secret_keys();
+
+	let db_rows: usize = 1<<(params.db_dim_1 + params.poly_len_log2); // db_row 
+	let db_cols: usize = 1<<(params.db_dim_2 + params.poly_len_log2); // db_col
+	println!("rows: {}, cols: {}", db_rows, db_cols);
+	let mut rng = rand::thread_rng();
+	
+	let mut matrix = Vec::with_capacity(db_rows * db_cols); // database matrix
+
+	for i in 0..db_rows{
+	    for j in 0..db_cols{
+		matrix.push((10*i+j) as u16);
+	    }
+	}	
+
+	
+	let server: YServer<u16> = YServer::<u16>::new( // database
+	    &params,
+	    matrix.into_iter(),
+	    false,
+	    true,
+	    false
+	);
+
+	let mut y_client = YClient::new(&mut client, &params);
+
+	let hint = server.answer_hint_ring(SEED_1, db_cols); // hint -> a part
+	
+	let packed_query_col = { // create query
+
+	    let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, 15); // query b -> b part
+	    let query_col_last_row = &query_col[params.poly_len * db_rows..];
+	    let packed_query_col_tmp = pack_query(&params, query_col_last_row); // query b
+	    
+	    packed_query_col_tmp
+	
+	};
+
+	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice());//buf.as_slice()); // simple pir response
+
+	let mut ct_vec_a = Vec::new();
+	let mut ct_vec_b = Vec::new();
+	for i in 0..response.len(){
+	    let mut ct_result = PolyMatrixRaw::zero(&params, 2, 1);
+	    let mut ct_a_result = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
+	    //println!("ct_a length: {}", ct_a_result.as_slice().len());
+	    let mut ct_b_result = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
+
+	    let mut poly = Vec::new();
+	    for j in 0..params.poly_len{
+		poly.push(hint.as_slice()[j*response.len() + i]);
+	    }
+	    let nega = negacyclic_perm(&poly, 0, params.modulus);
+
+	    let mlwe_a = rlwe_to_mlwe_a(&params, &nega, mlwe_params.poly_len_log2);
+
+	    for j in 0..params.poly_len {
+		ct_a_result.data[j] = mlwe_a[j];
+	    }
+
+	    ct_b_result.data[0] = response[i] as u64;
+
+	    ct_vec_a.push(ct_a_result.ntt());
+	    ct_vec_b.push(ct_b_result);
+	}
+	
+	for i in 0..128{
+	    let mut dec_res = decrypt_mlwe(&params, &mlwe_params, &ct_vec_a[i], &ct_vec_b[i].ntt(), &y_client.inner);
+	    println!("dec res : {:?}", dec_res.as_slice()[0]);
+	    println!("{}", server.db()[i*db_rows + 15]);//decrypted.data[0]);
+	    //assert_eq!(decrypted.data[0], server.db()[i*db_rows + 15] as u64);
+	}
+
+	//mlwe expansion
+
+	let t_exp = 3;
+	let auto_table = generate_automorph_tables_brute_force(&mlwe_params);
+	let pack_seed = [1u8; 32];
+
+	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut y_client.inner);
+
+	let ct_a_128 = ct_vec_a[0..mlwe_params.poly_len].to_vec();
+	let mut ct_b_128 = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
+
+	let mut ct_b_tmp_vec = Vec::new();
+	for i in 0..mlwe_params.poly_len{
+	    ct_b_tmp_vec.push(ct_vec_b[i].ntt());
+	}
+	
+
+	for i in 0..mlwe_params.poly_len{
+	    ct_b_128.data[i] = ct_vec_b[i].data[0];
+	}
+	
+	let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params);
+	let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
+
+	let (result_a, decomp_a_vec) = prep_pack_lwe_to_mlwe(&params, &mlwe_params, dimension, t_exp, &expansion_key_a, &ct_a_128, &auto_table, &expansion_table_neg, &expansion_table_pos);
+
+	let result_b_tmp = pack_lwes_to_mlwe_tmp(&mlwe_params, dimension, t_exp, &mut ct_b_tmp_vec, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, &decomp_a_vec); 
+
+	let result_b = pack_lwes_to_mlwe(&mlwe_params, dimension, t_exp, &ct_b_128, &expansion_key_b, &expansion_table_neg, &expansion_table_pos, &decomp_a_vec);
+
+	let mut dec = decrypt_mlwe(&params, &mlwe_params, &result_a, &result_b_tmp, &y_client.inner);
+	println!("result: {:?}", dec.as_slice());
 	
     }
 
