@@ -540,21 +540,21 @@ pub fn pack_lwes_to_mlwe_tmp<'a>(
 }
 
 pub fn pack_lwes_to_mlwe<'a>(
+    params: &'a Params,
     mlwe_params: &'a Params,
     dimension : usize,
     t_exp: usize, 
     //mlwe_a_to_pack: &[PolyMatrixNTT<'a>],
-    ct_b: &PolyMatrixRaw<'a>,
+    ct_b: &[u64],
     pub_param: &[PolyMatrixNTT<'a>],
-    //auto_table: &[Vec<usize>],
+    auto_table: &[Vec<usize>],
     expansion_table_neg: &[PolyMatrixNTT<'a>],
     expansion_table_pos: &[PolyMatrixNTT<'a>],
     decomp_a_vec : &[PolyMatrixNTT<'a>],
-) -> PolyMatrixNTT<'a> {
+) -> PolyMatrixRaw<'a> {
     let mut pos_times_ct_odd = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
     let mut neg_times_ct_odd = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
     let mut ct_sum_1 = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
-    //let mut decomp_a_vec = Vec::new();
 
     let mut working_set = Vec::new();
     for i in 0..mlwe_params.poly_len{
@@ -589,23 +589,25 @@ pub fn pack_lwes_to_mlwe<'a>(
 
 	    let mut ct_result_b = mlwe_automorph_b_for_packing(&mlwe_params, (1<<cur_ell)+1, t_exp, &decomp_a_vec[index], &pub_param[mlwe_params.poly_len_log2 - cur_ell]);//2^1+1, 2^2+1, ..., 2^7+1 // 6 5 4 3 2 1 0
 	    index = index + 1;
+	    
+	    apply_automorph_ntt(&mlwe_params, &auto_table, &ct_sum_1, ct_even, (1<<cur_ell)+1);
 
 	    add_into(ct_even, &ct_result_b);
 	}
     }
     let mut res = working_set[0].clone();
-    println!("working: {:?}", working_set[0].raw().as_slice());
+    //println!("working: {:?}", working_set[0].raw().as_slice());
+    let mut res_raw = res.raw();
 
-    let mut result_poly = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
     for z in 0..mlwe_params.poly_len{
-	let val = barrett_reduction_u128(&mlwe_params, ct_b.data[z] as u128 * mlwe_params.poly_len as u128);
-	result_poly.data[z] = val;
-	if result_poly.data[z] >= mlwe_params.modulus {
-	    result_poly.data[z] -= mlwe_params.modulus;
+	let val = barrett_reduction_u128(&params, ct_b[z] as u128 * mlwe_params.poly_len as u128);
+	res_raw.data[z] += val;
+	if res_raw.data[z] >= mlwe_params.modulus {
+	    res_raw.data[z] -= mlwe_params.modulus;
 	}
     }
-    let final_result = &res + &result_poly.ntt();
-    final_result
+    
+    res_raw
 }
 
 pub fn prep_query_expansion<'a>(

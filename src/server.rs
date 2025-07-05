@@ -2999,7 +2999,10 @@ mod test {
 	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut y_client.inner);
 
 	let ct_a_128 = ct_vec_a[0..mlwe_params.poly_len].to_vec();
-	let mut ct_b_128 = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
+	let mut ct_b_128 = Vec::new();//PolyMatrixRaw::zero(&mlwe_params, 1, 1);
+	for i in 0..mlwe_params.poly_len{
+	    ct_b_128.push(ct_vec_b[i].data[0] as u64);
+	}
 
 	let mut ct_b_tmp_vec = Vec::new();
 	for i in 0..mlwe_params.poly_len{
@@ -3008,19 +3011,18 @@ mod test {
 	
 
 	for i in 0..mlwe_params.poly_len{
-	    ct_b_128.data[i] = ct_vec_b[i].data[0];
+	    //ct_b_128.data[i] = ct_vec_b[i].data[0];
 	}
+	println!("ctb: {:?}", ct_b_128.as_slice());
 	
 	let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params);
 	let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
 
 	let (result_a, decomp_a_vec) = prep_pack_lwe_to_mlwe(&params, &mlwe_params, dimension, t_exp, &expansion_key_a, &ct_a_128, &auto_table, &expansion_table_neg, &expansion_table_pos);
 
-	let result_b_tmp = pack_lwes_to_mlwe_tmp(&mlwe_params, dimension, t_exp, &mut ct_b_tmp_vec, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, &decomp_a_vec); 
+	let result_b = pack_lwes_to_mlwe(&params, &mlwe_params, dimension, t_exp, &ct_b_128, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, &decomp_a_vec);
 
-	let result_b = pack_lwes_to_mlwe(&mlwe_params, dimension, t_exp, &ct_b_128, &expansion_key_b, &expansion_table_neg, &expansion_table_pos, &decomp_a_vec);
-
-	let mut dec = decrypt_mlwe(&params, &mlwe_params, &result_a, &result_b_tmp, &y_client.inner);
+	let mut dec = decrypt_mlwe(&params, &mlwe_params, &result_a, &result_b.ntt(), &y_client.inner);
 	println!("result: {:?}", dec.as_slice());
 	
     }
