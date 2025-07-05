@@ -3031,6 +3031,8 @@ mod test {
 	    decomp_a_mult.push(decomp_a_vec_tmp);
 	}	
 
+	let (result_a_tmps, decomps) = prep_pack_lwes_to_mlwe_db(&params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a, &ct_vec_a, &auto_table, &expansion_table_neg, &expansion_table_pos);
+
 	let mut ct_b_polys = PolyMatrixRaw::zero(&mlwe_params, db_cols / mlwe_params.poly_len, 1);
 	for i in 0..db_cols / mlwe_params.poly_len{
 	    let mut ct_bs = Vec::new();
@@ -3042,7 +3044,9 @@ mod test {
 	    ct_b_polys.as_mut_slice()[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].copy_from_slice(result_b_tmp.as_slice());
 	}
 
-	let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &ct_a_polys, &ct_b_polys.ntt(), &y_client.inner);
+	let result_b_tmps = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomps);
+
+	let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &result_a_tmps, &result_b_tmps.ntt(), &y_client.inner);
 
 	for i in 0..decrypted.len() {
 	    println!("{:?}", decrypted[i].as_slice());

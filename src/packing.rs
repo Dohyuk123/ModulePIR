@@ -3,7 +3,7 @@ use rand::Rng;
 
 use log::debug;
 
-use spiral_rs::{arith::*, gadget::*, ntt::*, params::*, poly::*};
+use spiral_rs::{arith::*, gadget::*, ntt::*, params::*, poly::*, aligned_memory::AlignedMemory64};
 
 use crate::server::Precomp;
 
@@ -383,26 +383,6 @@ fn homomorphic_automorph_b_slice<'a>(
     &ct_auto.ntt() + &w_times_ginv_ct_b // b + aB
 }
 
-//pub fn prep_pack_mlwes<'a>(
-//    params: &'a Params,
-//    pt_byte_log: usize, 
-//    t_exp: usize, 
-//    ct_a_vec: &[PolyMatrixNTT<'a>, 
-//    pub_param: &[PolyMatrixNTT<'a>],
-//) -> (Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>) {
-//    decomp_a_vec = Vec::new();
-
-//    let index = params.poly_len_log2 - pt_byte_log;
-//    let num = 1<<index;
-
-//    for i in 0..index{
-//	num_in = num>>(i+1);
-//	for j in 0..num_in{
-	   
-//	}
-//    }
-//}
-
 pub fn create_packing_table_mlwe_pos<'a>(
     params: &'a Params,
 ) -> Vec<PolyMatrixNTT<'a>> {
@@ -539,6 +519,52 @@ pub fn pack_lwes_to_mlwe_tmp<'a>(
     res
 }
 
+pub fn prep_pack_lwes_to_mlwe_db<'a>(
+    params: &'a Params, 
+    mlwe_params: &'a Params, 
+    hint: &[u64],
+    dimension : usize,
+    t_exp: usize,
+    expansion_key: &[PolyMatrixNTT<'a>],
+    ct_a_vec : &[PolyMatrixNTT<'a>],
+    auto_table: &[Vec<usize>],
+    expansion_table_neg: &[PolyMatrixNTT<'a>],
+    expansion_table_pos: &[PolyMatrixNTT<'a>],
+) -> (PolyMatrixNTT<'a>, Vec<Vec<PolyMatrixNTT<'a>>>){
+    let db_cols = 1<<(params.db_dim_2 + params.poly_len_log2);
+    let mut ct_vec_a = Vec::new();
+    for i in 0..db_cols {
+	let mut ct_a_result = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
+
+	let mut poly = Vec::new();
+	for j in 0..params.poly_len{
+	    poly.push(hint[j*db_cols + i]);
+	}
+	let nega = negacyclic_perm(&poly, 0, params.modulus);
+
+	let mlwe_a = rlwe_to_mlwe_a(&params, &nega, mlwe_params.poly_len_log2);
+
+	for j in 0..params.poly_len {
+	    ct_a_result.data[j] = mlwe_a[j];
+	}
+	
+	ct_vec_a.push(ct_a_result.ntt());
+
+    }
+
+    let mut decomp_a_mult = Vec::new();
+    let mut ct_a_polys = PolyMatrixNTT::zero(&mlwe_params, db_cols / mlwe_params.poly_len, dimension);
+    for i in 0..db_cols / mlwe_params.poly_len{
+	let ct_as = ct_vec_a[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].to_vec();
+	let (result_a_tmp, decomp_a_vec_tmp) = prep_pack_lwe_to_mlwe(&params, &mlwe_params, dimension, t_exp, &expansion_key, &ct_as, &auto_table, &expansion_table_neg, &expansion_table_pos);
+
+	ct_a_polys.as_mut_slice()[i*params.poly_len*2..(i+1)*params.poly_len*2].copy_from_slice(result_a_tmp.as_slice());    
+	decomp_a_mult.push(decomp_a_vec_tmp);
+    }
+
+    (ct_a_polys, decomp_a_mult)	
+}
+
 pub fn pack_lwes_to_mlwe<'a>(
     params: &'a Params,
     mlwe_params: &'a Params,
@@ -608,6 +634,35 @@ pub fn pack_lwes_to_mlwe<'a>(
     }
     
     res_raw
+}
+
+pub fn pack_lwes_to_mlwe_db<'a>(
+    params: &'a Params,
+    mlwe_params: &'a Params,
+    response: &AlignedMemory64,
+    dimension: usize,
+    t_exp: usize, 
+    //ct_bs: &[u64],
+    expansion_key: &[PolyMatrixNTT<'a>],
+    auto_table : &[Vec<usize>],
+    expansion_table_neg: &[PolyMatrixNTT<'a>],
+    expansion_table_pos: &[PolyMatrixNTT<'a>], 
+    decomp_a_mult: Vec<Vec<PolyMatrixNTT<'a>>>,
+) -> PolyMatrixRaw<'a> {
+    //let mut ct_vec_b = Vec::new();
+    let db_cols = 1<<(params.db_dim_2 + params.poly_len_log2);
+
+    let mut ct_b_polys = PolyMatrixRaw::zero(&mlwe_params, db_cols / mlwe_params.poly_len, 1);
+    for i in 0..db_cols / mlwe_params.poly_len{
+	let mut ct_bs = Vec::new();
+	for j in 0..mlwe_params.poly_len{
+	    ct_bs.push(response[i*mlwe_params.poly_len+j] as u64);
+	}
+	let result_b = pack_lwes_to_mlwe(&params, &mlwe_params, dimension, t_exp, &ct_bs, &expansion_key, &auto_table, &expansion_table_neg, &expansion_table_pos, &decomp_a_mult[i]);
+	
+	ct_b_polys.as_mut_slice()[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].copy_from_slice(result_b.as_slice());
+    }
+    ct_b_polys
 }
 
 pub fn prep_query_expansion<'a>(
