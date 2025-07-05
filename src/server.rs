@@ -2982,13 +2982,10 @@ mod test {
 	    ct_vec_a.push(ct_a_result.ntt());
 	    ct_vec_b.push(ct_b_result);
 	}
+
+	println!("{}", ct_vec_b.len());
 	
-	for i in 0..128{
-	    let mut dec_res = decrypt_mlwe(&params, &mlwe_params, &ct_vec_a[i], &ct_vec_b[i].ntt(), &y_client.inner);
-	    println!("dec res : {:?}", dec_res.as_slice()[0]);
-	    println!("{}", server.db()[i*db_rows + 15]);//decrypted.data[0]);
-	    //assert_eq!(decrypted.data[0], server.db()[i*db_rows + 15] as u64);
-	}
+	
 
 	//mlwe expansion
 
@@ -3004,16 +3001,10 @@ mod test {
 	    ct_b_128.push(ct_vec_b[i].data[0] as u64);
 	}
 
-	let mut ct_b_tmp_vec = Vec::new();
-	for i in 0..mlwe_params.poly_len{
-	    ct_b_tmp_vec.push(ct_vec_b[i].ntt());
-	}
-	
-
 	for i in 0..mlwe_params.poly_len{
 	    //ct_b_128.data[i] = ct_vec_b[i].data[0];
 	}
-	println!("ctb: {:?}", ct_b_128.as_slice());
+	//println!("ctb: {:?}", ct_b_128.as_slice());
 	
 	let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params);
 	let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
@@ -3024,7 +3015,111 @@ mod test {
 
 	let mut dec = decrypt_mlwe(&params, &mlwe_params, &result_a, &result_b.ntt(), &y_client.inner);
 	println!("result: {:?}", dec.as_slice());
+
+/////////////////////multiple////////////////////////
+
+	let mut ct_a_vec_mult = Vec::new();
+	let mut decomp_a_mult = Vec::new();
+	let mut ct_a_polys = PolyMatrixNTT::zero(&mlwe_params, db_cols / mlwe_params.poly_len, dimension);
+	for i in 0..db_cols / mlwe_params.poly_len{
+	    let ct_as = ct_vec_a[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].to_vec();
+	    let (result_a_tmp, decomp_a_vec_tmp) = prep_pack_lwe_to_mlwe(&params, &mlwe_params, dimension, t_exp, &expansion_key_a, &ct_as, &auto_table, &expansion_table_neg, &expansion_table_pos);
+
+	    ct_a_polys.as_mut_slice()[i*params.poly_len*2..(i+1)*params.poly_len*2].copy_from_slice(result_a_tmp.as_slice());
+	    
+	    ct_a_vec_mult.push(result_a_tmp);
+	    decomp_a_mult.push(decomp_a_vec_tmp);
+	}	
+
+	let mut ct_b_polys = PolyMatrixRaw::zero(&mlwe_params, db_cols / mlwe_params.poly_len, 1);
+	for i in 0..db_cols / mlwe_params.poly_len{
+	    let mut ct_bs = Vec::new();
+	    for j in 0..mlwe_params.poly_len{
+		ct_bs.push(ct_vec_b[i*mlwe_params.poly_len + j].data[0] as u64);
+	    }
+	    let result_b_tmp = pack_lwes_to_mlwe(&params, &mlwe_params, dimension, t_exp, &ct_bs, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, &decomp_a_mult[i]); 
+	    
+	    ct_b_polys.as_mut_slice()[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].copy_from_slice(result_b_tmp.as_slice());
+	}
+
+	let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &ct_a_polys, &ct_b_polys.ntt(), &y_client.inner);
+
+	for i in 0..decrypted.len() {
+	    println!("{:?}", decrypted[i].as_slice());
+	}
 	
     }
 
+    #[test]
+    fn test_whole_protocol(){ // start : row: 16384 / second : col:8192
+
+	////////first settings
+	let mut params = params_for_scenario(1<<30, 1);
+	params.pt_modulus = 1<<16;
+	
+	let mut mlwe_params = params.clone();
+	mlwe_params.poly_len_log2 = 7;
+	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
+	let dimension = params.poly_len / mlwe_params.poly_len;
+
+	let mut client = Client::init(&params);
+	client.generate_secret_keys();
+
+	let db_rows: usize = 1<<(params.db_dim_1 + params.poly_len_log2); // db_row 
+	let db_cols: usize = 1<<(params.db_dim_2 + params.poly_len_log2); // db_col
+	println!("rows: {}, cols: {}", db_rows, db_cols);
+	let mut rng = rand::thread_rng();
+	
+	let mut matrix = Vec::with_capacity(db_rows * db_cols); // database matrix
+
+	for i in 0..db_rows{
+	    for j in 0..db_cols{
+		matrix.push((10*i+j) as u16);
+	    }
+	}	
+
+	let server: YServer<u16> = YServer::<u16>::new( // database
+	    &params,
+	    matrix.into_iter(),
+	    false,
+	    true,
+	    false
+	);
+
+	let mut y_client = YClient::new(&mut client, &params);
+
+	////////////////////////////for keyswitching///////////////////
+	let t_exp = params.t_exp_left;
+	let auto_table = generate_automorph_tables_brute_force(&mlwe_params); //automorphism table for mlwe
+	let pack_seed = [1u8; 32];
+
+	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut y_client.inner); // key switching keys for lwe to mlwe
+
+	let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params); // expansion table for lwe to mlwe
+	let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
+
+	///////////////////////////////////////////////////////////////
+	///////////////////////hint preprocessing//////////////////////
+	///////////////////////////////////////////////////////////////
+
+	let hint = server.answer_hint_ring(SEED_1, db_cols);
+
+	let mut ct_vec_a = Vec::new();
+	for i in 0..db_rows{
+	    let mut ct_a_result = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
+	    let mut poly = Vec::new();
+	    for j in 0..params.poly_len {
+		poly.push(hint.as_slice()[j*db_cols + i]);
+	    }
+	
+	    let nega = negacyclic_perm(&poly, 0, params.modulus);
+	    let mlwe_a = rlwe_to_mlwe_a(&params, &nega, mlwe_params.poly_len_log2);
+	
+	    for j in 0..params.poly_len {
+		ct_a_result.data[j] = mlwe_a[j];
+	    }
+
+	    ct_vec_a.push(ct_a_result.ntt());
+	}
+    }
 }

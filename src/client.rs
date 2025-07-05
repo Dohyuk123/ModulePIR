@@ -65,7 +65,7 @@ pub fn mlwe_to_rlwe_b_combined<'a>(params: &'a Params, mut vector: Vec<u64>, pt_
 }
 
 pub fn rlwe_to_lwe<'a>(params: &'a Params, ct: &PolyMatrixRaw<'a>) -> Vec<u64> {
-    println!("ct: {}", ct.data[1000]);
+    //println!("ct: {}", ct.data[1000]);
     let a = ct.get_poly(0, 0);
     let mut negacylic_a = negacyclic_matrix(&a, params.modulus);
     negacylic_a.extend(ct.get_poly(1, 0));
@@ -434,7 +434,7 @@ impl<'a> YClient<'a> {
         let mut out = Vec::new();
 
         let scale_k = self.params.modulus / self.params.pt_modulus;
-	println!("scale: {}", scale_k);
+	//println!("scale: {}", scale_k);
 	//println!("encrypt modulus: {}, polylen: {}, scale_k: {}", self.params.modulus, self.params.poly_len, scale_k);
 
         for i in 0..(1 << dim_log2) {
@@ -505,7 +505,7 @@ impl<'a> YClient<'a> {
         index_row: usize,
     ) -> Vec<u64> {
         if public_seed_idx == SEED_0 && !packing {
-	    println!("packing");
+	    //println!("packing");
             let lwe_params = LWEParams::default();
             let dim = 1 << (dim_log2 + self.params.poly_len_log2);
 
@@ -560,7 +560,7 @@ impl<'a> YClient<'a> {
         let mut out = Vec::new();
 
         let scale_k = self.params.modulus / self.params.pt_modulus;
-	println!("scale: {}", scale_k);
+	//println!("scale: {}", scale_k);
 	//println!("encrypt modulus: {}, polylen: {}, scale_k: {}", self.params.modulus, self.params.poly_len, scale_k);
 
         for i in 0..(1 << dim_log2) {
@@ -647,7 +647,7 @@ impl<'a> YClient<'a> {
         index_row: usize,
     ) -> Vec<u64> {
         if public_seed_idx == SEED_0 && !packing {
-	    println!("packing");
+	    //println!("packing");
             let lwe_params = LWEParams::default();
             let dim = 1 << (dim_log2 + self.params.poly_len_log2);
 
@@ -677,7 +677,7 @@ impl<'a> YClient<'a> {
 
             lwes
         } else {
-	    println!("else");
+	    //println!("else");
             let out = self.generate_query_impl(public_seed_idx, dim_log2, packing, index_row);	
             let lwes = self.rlwes_to_lwes(&out);
             lwes
@@ -776,7 +776,7 @@ impl<'a> NewClient<'a> {
             }
 
             if packing {
-		println!("packing: {}", true);
+		//println!("packing: {}", true);
                 let factor =
                     invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
                 scalar = scalar_multiply_alloc(
@@ -792,7 +792,7 @@ impl<'a> NewClient<'a> {
             // }
 
             let ct = if multiply_ct {
-		println!("multiply_ct: {}", true);
+		//println!("multiply_ct: {}", true);
                 let factor =
                     invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
 
@@ -803,7 +803,7 @@ impl<'a> NewClient<'a> {
                     factor,
                 )
             } else {
-	 	println!("multiply_ct: {}", false);
+	 	//println!("multiply_ct: {}", false);
                 self.inner.encrypt_matrix_reg(
                     &scalar.ntt(),
                     &mut ChaCha20Rng::from_entropy(),
