@@ -414,6 +414,36 @@ impl<'a> YClient<'a> {
             .collect::<Vec<_>>();
         concat_horizontal(&v, self.params.poly_len + 1, self.params.poly_len)
     }
+
+    pub fn generate_query_double_mlwe(
+	&self,
+	mlwe_params: &Params,
+	public_seed_idx: u8,
+	dimension : usize,
+	dim_log1: usize,
+	pt_byte_log2: usize,
+	index: usize
+    ){ //-> PolyMatrixNTT<'a> {
+	assert_eq!((1<<(dim_log1 + self.params.poly_len - pt_byte_log2)) >= index, true);
+
+	let scale_k = self.params.modulus / self.params.pt_modulus;
+
+	let mut query_vec = vec![0u64; 1<<(dim_log1 + self.params.poly_len)];
+	query_vec[index * (1<<pt_byte_log2)] = scale_k;
+
+//	let mut plaintext_vec = Vec::new();
+
+	for i in 0..(query_vec.len() / self.params.poly_len){
+	    //let mut tmp_plain = PolyMatrixRaw::zero(mlwe_params, dimension, 1);
+	    //tmp_plain.as_mut_slice().copy_from_slice(&query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len]);
+	        
+//	    let plaintext = mlwe_to_rlwe_b_packed(self.params, &query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len].to_vec(), pt_byte_log2);
+//	    plaintext_vec.push(plaintext);
+	}
+
+	
+	
+    }
     
     pub fn generate_query_impl_mlwe(
         &self,
@@ -1248,4 +1278,47 @@ mod test {
 	
 	//let a = 
     } 
+
+    #[test]
+    fn test_transpose_poly() {
+	let params = params_for_scenario(1<<30, 1);
+	let mut mat = PolyMatrixRaw::random(&params, 8, 4);
+
+	let poly_len = params.poly_len;
+
+	let mat_slice = mat.as_slice();
+	//println!("mat slice: {:?}, {}", mat_slice, mat_slice.len());
+	let row = mat.get_rows();
+	let col = mat.get_cols();
+
+	let start = Instant::now();
+	let mut transposed = PolyMatrixRaw::zero(&params, col, row);
+	let transposed_array = transpose_poly(&params, &mat);
+	transposed.as_mut_slice().copy_from_slice(&transposed_array.as_slice());
+	let end = Instant::now();
+
+	println!("{:?}", end - start);
+
+	println!("{}, {}", row, col);
+
+	//for c in 0..col{
+	//    for r in 0..row{
+	//	transposed.as_mut_slice()[(row*poly_len*c + r*poly_len)..(row*poly_len*c + (r+1)*poly_len)].copy_from_slice(&mat_slice[(col*poly_len*r + c*poly_len)..(col*poly_len*r + (c+1)*poly_len)]);
+	  //  }
+	//}
+
+	//transpose_poly(&params, &mut transposed, &mat);
+
+    for r in 0..row{
+	for c in 0..col{
+    	    for i in 0..poly_len{
+		assert_eq!(mat.get_poly(r, c)[i], transposed.get_poly(c, r)[i]);
+	    }
+	} 
+    }
+
+	println!("finished");
+
+	//for i in
+    }
 }

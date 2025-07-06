@@ -38,6 +38,35 @@ use super::{
 //    packed_query_col
 //}
 
+pub fn transpose_poly<'a>(params: &Params, mat: &'a PolyMatrixRaw<'a>)-> Vec<u64>{
+    //assert_eq!(transpose.get_rows(), mat.get_cols());
+    //assert_eq!(transpose.get_cols(), mat.get_rows());
+
+    let mut array = vec![0u64; mat.as_slice().len()];
+
+    let poly_len = params.poly_len;
+
+    let mat_slice = mat.as_slice();
+    let row = mat.get_rows();
+    let col = mat.get_cols();
+
+    //let mut transposed = PolyMatrixRaw::zero(&params, col, row);
+
+    for c in 0..col{
+	for r in 0..row{
+	    array[(row*poly_len*c + r*poly_len)..(row*poly_len*c + (r+1)*poly_len)].copy_from_slice(&mat_slice[(col*poly_len*r + c*poly_len)..(col*poly_len*r + (c+1)*poly_len)]);
+	}
+    }
+    array
+    //for r in 0..row{
+//	for c in 0..col{
+//    	    for i in 0..poly_len{
+//		assert_eq!(mat.get_poly(r, c)[i], transpose.get_poly_mut(c, r)[i]);
+//	    }
+//	} 
+//    }
+}
+
 pub fn mlwe_to_mlwe_a(params: &Params, a: &Vec<u64>, mlwe_dim: usize, n: usize, len: usize) -> Vec<u64>{
     let mut combined_vec: Vec<u64> = vec![0; 2 * len]; // Allocate memory once
     let half_mlwe_dim = mlwe_dim / 2;
@@ -87,6 +116,33 @@ pub fn mlwe_to_mlwe_b(params: &Params, a: &Vec<u64>, mlwe_dim: usize, n: usize) 
 	//println!("{:?}", combined_vec);
     }
     combined_vec
+}
+
+pub fn mlwe_to_mlwe_b_inverse(params: &Params, a: &mut Vec<u64>, mlwe_bit: usize){
+    let poly_len = params.poly_len;
+    let mut output: Vec<u64> = vec![0; poly_len];
+    let mlwe_byte = 1<<mlwe_bit;
+
+    for i in 0..poly_len / (2*mlwe_byte) {
+	for j in 0..mlwe_byte {
+	    output[2*j + 2*i*mlwe_byte] = a[j + i*2*mlwe_byte];
+	    output[2*j + 1 + 2*i*mlwe_byte] = a[mlwe_byte + j + 2*i*mlwe_byte];
+	}
+    }
+    //println!("a: {:?}", a);
+    //println!("output: {:?}", output);
+    a.as_mut_slice().copy_from_slice(&output.as_slice());
+    
+}
+
+pub fn mlwe_to_rlwe_b_packed(params: &Params, a:&mut Vec<u64>, mlwe_bit: usize){
+    //let mut tmp_output = mlwe_to_mlwe_b_inverse(params, &a, mlwe_bit);
+    let mut mlwe_bit_tmp = mlwe_bit;
+    for i in 0..(params.poly_len_log2 - mlwe_bit) {
+	mlwe_to_mlwe_b_inverse(params, a , mlwe_bit_tmp);
+	mlwe_bit_tmp += 1; 
+    }
+
 }
 
 // vector to vector
@@ -2693,7 +2749,7 @@ mod test {
     fn test_mlwe_b() {
 	let mut params = get_test_params();
 	let mut mlwe_params = params.clone();
-	let mlwe_bit = 2;
+	let mlwe_bit = 3;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
 	params.poly_len_log2 = 4;
@@ -2714,10 +2770,15 @@ mod test {
 	
 	let mut output_poly = PolyMatrixRaw::zero(&params, 1, 1);
 
+	let mut slice = mlwe_result.as_mut_slice().to_vec();
+
 	let start = Instant::now();
+	mlwe_to_rlwe_b_packed(&params, &mut slice, mlwe_bit);
 	mlwe_to_rlwe_b(&params, &mut output_poly, mlwe_result.get_poly(0, 0), mlwe_bit, 0);
 	let end = Instant::now();
 	println!("time: {:?}", end - start);
+
+	println!("{:?}", slice);
 
 	println!("{:?}", output_poly.as_slice());
 	
@@ -3069,7 +3130,8 @@ mod test {
 	let mut y_client = YClient::new(&mut client, &params);
 
 	//let g_exp = build_gadget(&mlwe_params, 1, 4); // for gadget decomposition
-	
+	let mut g_inv_a = PolyMatrixRaw::zero(&mlwe_params, dimension * 4, db_cols / mlwe_params.poly_len);
+	let mut g_inv_b = PolyMatrixRaw::zero(&mlwe_params, 4, db_cols / mlwe_params.poly_len);
 	
 
 	////////////////////////////for keyswitching///////////////////
@@ -3088,39 +3150,69 @@ mod test {
 
 	let hint = server.answer_hint_ring(SEED_1, db_cols);
 
-	let (result_a_tmps, decomp_a) = prep_pack_lwes_to_mlwe_db(&params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a, &auto_table, &expansion_table_neg, &expansion_table_pos);
+	let (response_a, decomp_a) = prep_pack_lwes_to_mlwe_db(&params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a, &auto_table, &expansion_table_neg, &expansion_table_pos);
 
-	let result_a_simple_raw = result_a_tmps.raw();
+	let response_a_simple_raw = response_a.raw();
+	let mut response_a_simple_raw_transposed = PolyMatrixRaw::zero(&mlwe_params, response_a_simple_raw.get_cols(), response_a_simple_raw.get_rows());
+
+	let transposed_array = transpose_poly(&mlwe_params, &response_a_simple_raw);
+	response_a_simple_raw_transposed.as_mut_slice().copy_from_slice(transposed_array.as_slice());
+	
+	gadget_invert_rdim(&mut g_inv_a, &response_a_simple_raw_transposed, 4);
+
+	let g_inv_a_ntt = g_inv_a.ntt(); // hint 0
+
+	let mut hint_0s = Vec::new();
+	for i in 0..4{
+	    hint_0s.push(g_inv_a_ntt.submatrix(i*dimension, 0, dimension, db_cols / mlwe_params.poly_len)); 
+	}
 	
 
 	///////////////////////////////////////////////////////////////
 	//////////////////////query////////////////////////////////////
 
-
-
-	let packed_query_col = { // create query
-
-	    let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, 15); // query b -> b part
-	    let query_col_last_row = &query_col[params.poly_len * db_rows..];
-	    let packed_query_col_tmp = pack_query(&params, query_col_last_row); // query b
-	    
-	    packed_query_col_tmp
+////////////////////////////////client creates query////////////////////////////
 	
-	};
+	// simple query
+
+	let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, 15); // query b -> b part
+	let query_col_last_row = &query_col[params.poly_len * db_rows..];
+	let packed_query_col = pack_query(&params, query_col_last_row); // query b
+
+	
+	
+
+	//double query
+
+///////////////////////////////response starts/////////////////////////////
 
 	let start = Instant::now();
 
-	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice()); // response
+	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice()); // simple response
 
-	let result_b_tmps = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
+	let response_b_simple = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
+
+	let mut response_b_simple_transposed = PolyMatrixRaw::zero(&mlwe_params, response_b_simple.get_cols(), response_b_simple.get_rows());
+
+	let transposed_array_b = transpose_poly(&mlwe_params, &response_b_simple);
+	response_b_simple_transposed.as_mut_slice().copy_from_slice(transposed_array_b.as_slice());
+
+	gadget_invert_rdim(&mut g_inv_b, &response_b_simple_transposed, 4);
+	let g_inv_b_ntt = g_inv_b.ntt(); // response 0
+
+	let mut response_0s = Vec::new();
+	
+	for i in 0..4{
+	    response_0s.push(g_inv_b_ntt.submatrix(i, 0, 1, db_cols / mlwe_params.poly_len)); 
+	}
 
 	let end = Instant::now();
 
 	println!("time: {:?}", end - start);
 
-	//let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &result_a_tmps, &result_b_tmps.ntt(), &y_client.inner);
+	//let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &response_a, &response_b_simple.ntt(), &y_client.inner);
 
-	//for i in 0..decrypted.len() {
+	//for i in 0..1{//decrypted.len() {
 	    //println!("{:?}", decrypted[i].as_slice());
 	//}
 
