@@ -2811,13 +2811,13 @@ mod test {
 
 	let start = Instant::now();
 	mlwe_to_rlwe_b_packed(&params, &mut slice, mlwe_bit);
-	//mlwe_to_rlwe_b(&params, &mut output_poly, mlwe_result.get_poly(0, 0), mlwe_bit, 0);
+	mlwe_to_rlwe_b(&params, &mut output_poly, mlwe_result.get_poly(0, 0), mlwe_bit, 0);
 	let end = Instant::now();
 	println!("time: {:?}", end - start);
 
 	println!("{:?}", slice);
 
-	//println!("{:?}", output_poly.as_slice());
+	println!("{:?}", output_poly.as_slice());
 	
 
     }
@@ -3184,6 +3184,32 @@ mod test {
 	let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params); // expansion table for lwe to mlwe
 	let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
 
+	let y_constants = generate_y_constants(&params);
+	
+	let pack_pub_params = raw_generate_expansion_params(
+            &params,
+            y_client.inner.get_sk_reg(),
+            params.poly_len_log2,
+            params.t_exp_left,
+            &mut ChaCha20Rng::from_entropy(),
+            &mut ChaCha20Rng::from_seed(pack_seed),
+        );
+
+	let mut fake_pack_pub_params = pack_pub_params.clone();
+        // zero out all of the second rows
+        for i in 0..pack_pub_params.len() {
+            for col in 0..pack_pub_params[i].cols {
+                fake_pack_pub_params[i].get_poly_mut(1, col).fill(0);
+            }
+        }
+
+        let mut pack_pub_params_row_1s = pack_pub_params.clone();
+        for i in 0..pack_pub_params.len() {
+            pack_pub_params_row_1s[i] =
+                pack_pub_params[i].submatrix(1, 0, 1, pack_pub_params[i].cols);
+            pack_pub_params_row_1s[i] = condense_matrix(&params, &pack_pub_params_row_1s[i]);
+        }
+
 	///////////////////////////////////////////////////////////////
 	///////////////////////hint preprocessing//////////////////////
 	///////////////////////////////////////////////////////////////
@@ -3214,6 +3240,34 @@ mod test {
 	    let hint_final_element = &hint_0s[i] * &double_query_a;
 	    hint_final_0.push(hint_final_element);
 	}
+
+	////////////////packing mlwes to rlwe A//////////////////////////
+
+	let mut packed_a_vec = Vec::new();
+	for i in 0..4{
+	    let mut packed_a = Vec::new();
+	    for j in 0..dimension{
+		let mut input_poly = PolyMatrixRaw::zero(&params, 2, 1);
+		let mut input_poly_tmp = PolyMatrixRaw::zero(&params, 1, 1);
+
+		mlwe_to_rlwe_a(&params, &mut input_poly_tmp, hint_final_0[i].submatrix(j, 0, 1, 16).as_slice().to_vec(), mlwe_params.poly_len_log2);
+		input_poly.as_mut_slice()[0..params.poly_len].copy_from_slice(&input_poly_tmp.as_slice());
+		packed_a.push(input_poly.ntt());
+	    }
+
+	    let (precomp_res, precomp_vals, precomp_tables) = precompute_pack_mlwe_to_rlwe(
+	        &params,
+	        params.poly_len_log2,
+	        mlwe_params.poly_len_log2,
+	        &packed_a,
+	        &fake_pack_pub_params,
+	        &y_constants,
+	    );
+	 
+	    packed_a_vec.push((precomp_res, precomp_vals, precomp_tables))
+	}
+
+	/////////////////////////preprocessing finished////////////////////////////
 	
 
 	///////////////////////////////////////////////////////////////
@@ -3222,32 +3276,32 @@ mod test {
 ////////////////////////////////client creates query////////////////////////////
 	
 	// simple query
-
 	let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, 15); // query b -> b part
 	let query_col_last_row = &query_col[params.poly_len * db_rows..];
 	let packed_query_col = pack_query(&params, query_col_last_row); // query b // row: 16384
 
-	let double_query_b = y_client.generate_query_double_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2,  mlwe_params.poly_len_log2, 63); // col: 8192
-	println!("{}", double_query_b.get_rows());
-
-	
-	
-
 	//double query
+	let double_query_b = y_client.generate_query_double_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2,  mlwe_params.poly_len_log2, 63); // col: 8192
+
+	println!("{}", double_query_b.get_rows());
 
 ///////////////////////////////response starts/////////////////////////////
 
 	let start = Instant::now();
 
-	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice()); // simple response
+	//simple response
+	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice()); 
 
 	println!("response: {}", response.len());
 
+	let start_0 = Instant::now();
+
+	//pack simple response into mlwe
 	let response_b_simple = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
-
 	
-
 	let mut response_b_simple_transposed = PolyMatrixRaw::zero(&mlwe_params, response_b_simple.get_cols(), response_b_simple.get_rows());
+
+	//let start_1 = Instant::now();
 
 	let transposed_array_b = transpose_poly(&mlwe_params, &response_b_simple);
 	response_b_simple_transposed.as_mut_slice().copy_from_slice(transposed_array_b.as_slice());
@@ -3261,7 +3315,7 @@ mod test {
 	    response_0s.push(g_inv_b_ntt.submatrix(i, 0, 1, db_cols / mlwe_params.poly_len)); 
 	}
 
-	//let mut hint_final_0 = Vec::new(); // hint only made of a parts //A1 * A2
+	let start_1 = Instant::now();
 
 	let mut response_0_times_hint_double_vec = Vec::new(); // b1 times A2
 	for i in 0..4{
@@ -3281,10 +3335,103 @@ mod test {
 	    hint_0_times_response_1_vec.push(hint_0_times_response_1);
 	}
 
+	////////////////////mlwe to rlwe packing//////////////////////////
+
+	let mut packed_b = Vec::new();
+	for num in 0..4{
+	    let mut b_values = Vec::new();
+	    let mut tmp_rlwe_poly = PolyMatrixRaw::zero(&params, 1, 1);
+	    for i in 0..dimension {
+	        let mlwe_tmp = hint_0_times_response_1_vec[num].submatrix(i, 0, 1, 1);
+		let mlwe_tmp_raw = mlwe_tmp.raw();
+		
+		for j in 0..mlwe_params.poly_len{
+		    tmp_rlwe_poly.as_mut_slice()[j*dimension + i] = mlwe_tmp_raw.as_slice()[j];
+	        }
+	    }
+	    for i in 0..params.poly_len {
+		b_values.push(tmp_rlwe_poly.as_slice()[i]);
+	    }
+
+	    let (tmp_precomp_res, tmp_precomp_vals, tmp_precomp_tables) = &packed_a_vec[num];
+
+	    let packed = pack_using_precomp_vals_mlwe_to_rlwe(
+	        &params,
+	        params.poly_len_log2,
+	        mlwe_params.poly_len_log2,
+	        &pack_pub_params_row_1s,
+	        &b_values,
+	        &tmp_precomp_res,
+	        &tmp_precomp_vals,
+	        &tmp_precomp_tables,
+	        &y_constants,
+	    );
+	    
+	    packed_b.push(packed);
+	}
+
+	let mut last_pack_a_vec = Vec::new();
+	for i in 0..4{
+	    let mut input_poly = PolyMatrixRaw::zero(&params, 2, 1);
+	    let mut input_poly_tmp = PolyMatrixRaw::zero(&params, 1, 1);
+	    
+	    mlwe_to_rlwe_a(&params, &mut input_poly_tmp, response_0_times_hint_double_vec[i].as_slice().to_vec(), mlwe_params.poly_len_log2);
+	    input_poly.as_mut_slice()[0..params.poly_len].copy_from_slice(&input_poly_tmp.as_slice());
+	    last_pack_a_vec.push(input_poly.ntt());
+	}
+
+	for j in 4..dimension{
+	    let mut input_poly = PolyMatrixRaw::zero(&params, 2, 1);
+	    last_pack_a_vec.push(input_poly.ntt());
+	}
+
+        let (last_precomp_res, last_precomp_vals, last_precomp_tables) = precompute_pack_mlwe_to_rlwe(
+	    &params,
+	    params.poly_len_log2,
+	    mlwe_params.poly_len_log2,
+	    &last_pack_a_vec,
+	    &fake_pack_pub_params,
+	    &y_constants,
+	);
+
+///////////////////////////////////////////////////////////////////
+	//response_mult_vec
+	//let mut packed_b = Vec::new();
+	let mut last_b_values = Vec::new();
+	let mut tmp_last_rlwe_poly = PolyMatrixRaw::zero(&params, 1, 1);
+	for num in 0..4{
+	    let mut last_mlwe_tmp = response_mult_vec[num].submatrix(0, 0, 1, 1);
+	    let last_mlwe_tmp_raw = last_mlwe_tmp.raw();
+	    for j in 0..mlwe_params.poly_len{
+		tmp_last_rlwe_poly.as_mut_slice()[j*dimension + num] = last_mlwe_tmp_raw.as_slice()[j];
+	    }
+	}
+
+	for i in 0..params.poly_len{
+	    last_b_values.push(tmp_last_rlwe_poly.as_slice()[i]);
+	}
+
+	let last_packed = pack_using_precomp_vals_mlwe_to_rlwe(
+	    &params,
+	    params.poly_len_log2,
+	    mlwe_params.poly_len_log2,
+	    &pack_pub_params_row_1s,
+	    &last_b_values,
+	    &last_precomp_res,
+	    &last_precomp_vals,
+	    &last_precomp_tables,
+	    &y_constants,
+	);
+
 	let end = Instant::now();
 
-	println!("time: {:?}", end - start);
+	println!("simple time: {:?}", start_0 - start);
 
+	println!("total time: {:?}", end - start);
+
+	println!("first packing time: {:?}", start_1 - start_0);
+	
+	println!("double time : {:?}", end - start_1); 
 	//let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &double_query_a, &double_query_b, &y_client.inner);
 
 	//println!("decrypted_len: {}", decrypted.len());
