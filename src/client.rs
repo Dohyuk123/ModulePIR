@@ -417,32 +417,68 @@ impl<'a> YClient<'a> {
 
     pub fn generate_query_double_mlwe(
 	&self,
-	mlwe_params: &Params,
-	public_seed_idx: u8,
+	mlwe_params: &'a Params,
+	public_seed_idx: u8, //SEED_0
 	dimension : usize,
-	dim_log1: usize,
+	dim_log2: usize,
 	pt_byte_log2: usize,
-	index: usize
-    ){ //-> PolyMatrixNTT<'a> {
-	assert_eq!((1<<(dim_log1 + self.params.poly_len - pt_byte_log2)) >= index, true);
+	index: usize, 
+    ) -> PolyMatrixNTT<'a> {
+	assert_eq!((1<<(dim_log2 + self.params.poly_len_log2 - pt_byte_log2)) >= index, true);
+
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx)); 
 
 	let scale_k = self.params.modulus / self.params.pt_modulus;
 
-	let mut query_vec = vec![0u64; 1<<(dim_log1 + self.params.poly_len)];
+	let mut query_vec = vec![0u64; 1<<(dim_log2 + self.params.poly_len_log2)]; // mlwe
+	//for i in 0..128{
+	//    query_vec[i] = (i as u64);
+	//}	
 	query_vec[index * (1<<pt_byte_log2)] = scale_k;
+	//println!("index: {}", index * (1<<pt_byte_log2));
+	//println!("query_vec: {:?}", query_vec.as_slice());
 
-//	let mut plaintext_vec = Vec::new();
+	let mut plaintext_vec = Vec::new();
 
-	for i in 0..(query_vec.len() / self.params.poly_len){
-	    //let mut tmp_plain = PolyMatrixRaw::zero(mlwe_params, dimension, 1);
-	    //tmp_plain.as_mut_slice().copy_from_slice(&query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len]);
-	        
-//	    let plaintext = mlwe_to_rlwe_b_packed(self.params, &query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len].to_vec(), pt_byte_log2);
-//	    plaintext_vec.push(plaintext);
+	for i in 0..(1<<dim_log2){
+	    let mut plaintext = PolyMatrixRaw::zero(self.params, 1, 1);
+	    //plaintext.as_mut_slice().copy_from_slice(&query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len]);
+	    let mut tmp_plain = Vec::new();//query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len];
+
+	    for j in 0..self.params.poly_len {
+		tmp_plain.push(query_vec[i*self.params.poly_len + j]);
+	    }
+	    //if (i == 0) {
+		//println!("tmp: {:?}", tmp_plain);
+	//    }
+	    
+	    //mlwe_to_rlwe_b_packed(self.params, &mut plaintext.as_mut_slice(), pt_byte_log2);
+	    mlwe_to_rlwe_b_packed(self.params, &mut tmp_plain, pt_byte_log2); //
+
+	  //  if (i == 0) {
+		//println!("tmp: {:?}", tmp_plain);
+	    //}
+
+	    plaintext.as_mut_slice().copy_from_slice(&tmp_plain);
+	    plaintext_vec.push(plaintext.ntt());
+	}
+	//println!("rlwe: {:?}", plaintext_vec[0].raw().as_slice());
+
+	let mut rlwe_ct_vec = Vec::new();
+	for i in 0..plaintext_vec.len() {
+	    let ct = self.inner.encrypt_matrix_reg(&plaintext_vec[i], &mut ChaCha20Rng::from_entropy(), &mut rng_pub);
+	    rlwe_ct_vec.push(ct.submatrix(1, 0, 1, 1).raw());
 	}
 
-	
-	
+	let mut query_poly = PolyMatrixRaw::zero(mlwe_params, 1<<(dim_log2 + self.params.poly_len_log2 - pt_byte_log2), 1);
+	println!("length: {}", 1<<(dim_log2 + self.params.poly_len_log2 - pt_byte_log2));
+
+	for i in 0..query_poly.as_slice().len()/self.params.poly_len {
+	    let mlwe = rlwe_to_mlwe_b(self.params, &rlwe_ct_vec[i].as_slice().to_vec(), pt_byte_log2);
+	    query_poly.as_mut_slice()[i*self.params.poly_len..(i+1)*self.params.poly_len].copy_from_slice(&mlwe);
+	}
+	let query_poly_ntt = query_poly.ntt();
+	query_poly_ntt
     }
     
     pub fn generate_query_impl_mlwe(

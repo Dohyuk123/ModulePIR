@@ -753,6 +753,37 @@ where
         res
     }
 
+    pub fn generate_double_hint_mlwe(
+	&self,
+	mlwe_params: &'a Params,
+	public_seed_idx: u8,
+	dimension : usize,
+	dim_log1: usize,
+	pt_byte_log2: usize,
+	index: usize,
+	client: &'a Client,
+    ) -> PolyMatrixNTT<'a> {
+	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx)); // very important!!
+
+	let mut rlwe_ct_vec = Vec::new();
+
+	for i in 0..(1<<dim_log1) {
+	    let plaintext = PolyMatrixNTT::zero(self.params, 1, 1);
+	    let ct = client.encrypt_matrix_reg(&plaintext, &mut ChaCha20Rng::from_entropy(), &mut rng_pub);
+	    //let tmp_array = ct.submatrix(0, 0, 1, 1).raw().as_slice();
+	    rlwe_ct_vec.push(rlwe_to_mlwe_a(self.params, &ct.submatrix(0, 0, 1, 1).raw().as_slice().to_vec(), pt_byte_log2));
+	}
+	
+	let mut poly_hint = PolyMatrixRaw::zero(mlwe_params, 1<<(dim_log1 + self.params.poly_len_log2 - pt_byte_log2), dimension);
+	let length = rlwe_ct_vec[0].as_slice().len();	
+	for i in 0..rlwe_ct_vec.len() {
+	    poly_hint.as_mut_slice()[i*length..(i+1)*length].copy_from_slice(&rlwe_ct_vec[i].as_slice());
+	}
+
+	let poly_hint_ntt = poly_hint.ntt();
+	poly_hint_ntt
+    }
+
     pub fn generate_hint_0(&self) -> Vec<u64> {
         let _db_rows = 1 << (self.params.db_dim_1 + self.params.poly_len_log2);
         let db_cols = self.db_cols();
@@ -2718,7 +2749,7 @@ mod test {
     fn test_mlwe_a() {
 	let mut params = get_test_params();
 	let mut mlwe_params = params.clone();
-	let mlwe_bit = 3;
+	let mlwe_bit = 4;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
 	params.poly_len_log2 = 5;
@@ -2752,35 +2783,41 @@ mod test {
 	let mlwe_bit = 3;
         let mut client = Client::init(&params);
         client.generate_secret_keys();
-	params.poly_len_log2 = 4;
+	params.poly_len_log2 = 6;
 	params.poly_len = 1<<params.poly_len_log2;
 	mlwe_params.poly_len_log2 = mlwe_bit;
 	mlwe_params.poly_len = 1<<mlwe_bit;
+	let dimension = params.poly_len / mlwe_params.poly_len;
 
 	let mut poly = PolyMatrixRaw::zero(&params, 1, 1);
 	for i in 0..params.poly_len{
 	    poly.data[i] = (i) as u64;
 	}
 
+	//poly.data[4] = 1 as u64;
+
+	println!("orig : {:?}", poly.as_slice());
+
 	let mut mlwe = rlwe_to_mlwe_b(&params, &poly.as_slice().to_vec(), mlwe_bit);
 	let mut mlwe_result = PolyMatrixRaw::zero(&mlwe_params, params.poly_len / mlwe_params.poly_len, 1);
 	mlwe_result.as_mut_slice().copy_from_slice(&mlwe);
 
-	println!("{:?}", mlwe_result.as_slice());
+	println!("mlwe : {:?}", mlwe_result.as_slice());
 	
 	let mut output_poly = PolyMatrixRaw::zero(&params, 1, 1);
 
 	let mut slice = mlwe_result.as_mut_slice().to_vec();
+	println!("{:?}", slice);
 
 	let start = Instant::now();
 	mlwe_to_rlwe_b_packed(&params, &mut slice, mlwe_bit);
-	mlwe_to_rlwe_b(&params, &mut output_poly, mlwe_result.get_poly(0, 0), mlwe_bit, 0);
+	//mlwe_to_rlwe_b(&params, &mut output_poly, mlwe_result.get_poly(0, 0), mlwe_bit, 0);
 	let end = Instant::now();
 	println!("time: {:?}", end - start);
 
 	println!("{:?}", slice);
 
-	println!("{:?}", output_poly.as_slice());
+	//println!("{:?}", output_poly.as_slice());
 	
 
     }
@@ -3098,6 +3135,9 @@ mod test {
 	let mut params = params_for_scenario(1<<30, 1);
 	params.pt_modulus = 1<<16;
 	
+	params.db_dim_1 = 4;
+	params.db_dim_2 = 3;
+
 	let mut mlwe_params = params.clone();
 	mlwe_params.poly_len_log2 = 7;
 	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
@@ -3164,7 +3204,15 @@ mod test {
 
 	let mut hint_0s = Vec::new();
 	for i in 0..4{
-	    hint_0s.push(g_inv_a_ntt.submatrix(i*dimension, 0, dimension, db_cols / mlwe_params.poly_len)); 
+	    hint_0s.push(g_inv_a_ntt.submatrix(i*dimension, 0, dimension, db_cols / mlwe_params.poly_len)); //hint0 decomposed
+	}
+
+	let double_query_a = server.generate_double_hint_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2, mlwe_params.poly_len_log2, 2, &y_client.inner); // double query a
+
+	let mut hint_final_0 = Vec::new(); // hint only made of a parts
+	for i in 0..4{
+	    let hint_final_element = &hint_0s[i] * &double_query_a;
+	    hint_final_0.push(hint_final_element);
 	}
 	
 
@@ -3177,7 +3225,10 @@ mod test {
 
 	let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, 15); // query b -> b part
 	let query_col_last_row = &query_col[params.poly_len * db_rows..];
-	let packed_query_col = pack_query(&params, query_col_last_row); // query b
+	let packed_query_col = pack_query(&params, query_col_last_row); // query b // row: 16384
+
+	let double_query_b = y_client.generate_query_double_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2,  mlwe_params.poly_len_log2, 63); // col: 8192
+	println!("{}", double_query_b.get_rows());
 
 	
 	
@@ -3190,7 +3241,11 @@ mod test {
 
 	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice()); // simple response
 
+	println!("response: {}", response.len());
+
 	let response_b_simple = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
+
+	
 
 	let mut response_b_simple_transposed = PolyMatrixRaw::zero(&mlwe_params, response_b_simple.get_cols(), response_b_simple.get_rows());
 
@@ -3206,14 +3261,36 @@ mod test {
 	    response_0s.push(g_inv_b_ntt.submatrix(i, 0, 1, db_cols / mlwe_params.poly_len)); 
 	}
 
+	//let mut hint_final_0 = Vec::new(); // hint only made of a parts //A1 * A2
+
+	let mut response_0_times_hint_double_vec = Vec::new(); // b1 times A2
+	for i in 0..4{
+	    let response_0_times_hint_double = &response_0s[i] * &double_query_a;
+	    response_0_times_hint_double_vec.push(response_0_times_hint_double);
+	}
+
+	let mut response_mult_vec = Vec::new(); // response times response // b1 time b2
+	for i in 0..4{
+	    let response_mult = &response_0s[i] * &double_query_b;
+	    response_mult_vec.push(response_mult);
+	}
+
+	let mut hint_0_times_response_1_vec = Vec::new(); // hint only made of a parts // A1 time b2
+	for i in 0..4{
+	    let hint_0_times_response_1 = &hint_0s[i] * &double_query_b;//&hint_0s[i] * &double_query_a;
+	    hint_0_times_response_1_vec.push(hint_0_times_response_1);
+	}
+
 	let end = Instant::now();
 
 	println!("time: {:?}", end - start);
 
-	//let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &response_a, &response_b_simple.ntt(), &y_client.inner);
+	//let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &double_query_a, &double_query_b, &y_client.inner);
 
-	//for i in 0..1{//decrypted.len() {
-	    //println!("{:?}", decrypted[i].as_slice());
+	//println!("decrypted_len: {}", decrypted.len());
+
+	//for i in 0..decrypted.len() {
+	//    println!("{:?}", decrypted[i].as_slice());
 	//}
 
     }
