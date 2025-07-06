@@ -3341,69 +3341,64 @@ mod test {
 	}
 
 /////////////////////////debug/////////////////////////////////
-	let mut decrypted_vec = Vec::new();
-	for i in 0..4{	
-	    let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &hint_final_0[i], &hint_0_times_response_1_vec[i], &y_client.inner);
-	    decrypted_vec.push(decrypted);
-	}
+//	let mut decrypted_vec = Vec::new();
+//	for i in 0..4{	
+//	    let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &hint_final_0[i], &hint_0_times_response_1_vec[i], &y_client.inner);
+//	    decrypted_vec.push(decrypted);
+//	}
 
-	for i in 0..decrypted_vec[0].len() {
-	    for j in 0..mlwe_params.poly_len {
+//	for i in 0..decrypted_vec[0].len() {
+//	    for j in 0..mlwe_params.poly_len {
 		//assert_eq!(decrypted_vec[1][i].as_slice()[j], hint_0s[1].raw().submatrix(i, target_col, 1, 1).data[j]); 
-	    }
-	}
+//	    }
+//	}
 
-	let mut poly_decomposed = PolyMatrixRaw::zero(&mlwe_params, 4, dimension);
+//	let mut poly_decomposed = PolyMatrixRaw::zero(&mlwe_params, 4, dimension);
 
-	for i in 0..4{
-	    for j in 0..dimension{
-	    	poly_decomposed.as_mut_slice()[i*params.poly_len + j*mlwe_params.poly_len..i*params.poly_len + (j+1)*mlwe_params.poly_len].copy_from_slice(&decrypted_vec[i][j].as_slice());
-	    }	
-	}
+//	for i in 0..4{
+//	    for j in 0..dimension{
+//	    	poly_decomposed.as_mut_slice()[i*params.poly_len + j*mlwe_params.poly_len..i*params.poly_len + (j+1)*mlwe_params.poly_len].copy_from_slice(&decrypted_vec[i][j].as_slice());
+//	    }	
+//	}
 
-	let poly_composed = &g_exp.ntt() * &poly_decomposed.ntt(); // first query a part decrypted!!
+//	let poly_composed = &g_exp.ntt() * &poly_decomposed.ntt(); // first query a part decrypted!!
 
-	//response_a_simple_raw_transposed
-
-	for i in 0..params.poly_len{
+//	for i in 0..params.poly_len{
 	    //assert_eq!(response_a_simple_raw_transposed.submatrix(0, target_col, dimension, 1).data[i], poly_composed.raw().data[i]);
-	}
+//	}
 
-	//response_0_times_hint_double_vec = Vec::new(); // b1 times A2
-	//response_mult_vec = Vec::new(); // response times response // b1 time b2
-
-	let mut decrypted_b_vec = Vec::new();
-	for i in 0..4{	
-	    let decrypted_b = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &response_0_times_hint_double_vec[i], &response_mult_vec[i], &y_client.inner);
-	    for j in 0..mlwe_params.poly_len {
+//	let mut decrypted_b_vec = Vec::new();
+//	for i in 0..4{	
+//	    let decrypted_b = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &response_0_times_hint_double_vec[i], &response_mult_vec[i], &y_client.inner);
+//	    for j in 0..mlwe_params.poly_len {
 		//assert_eq!(decrypted_b[0].data[j], response_0s[i].submatrix(0, target_col, 1, 1).raw().data[j]);
 	    }
-	    decrypted_b_vec.push(decrypted_b);
+//	    decrypted_b_vec.push(decrypted_b);
 	    
-	}
-	println!("done");
+//	}
+//	println!("done");
 
 	//response_0s
 
-	let mut poly_b_decomposed = PolyMatrixRaw::zero(&mlwe_params, 4, 1);
+//	let mut poly_b_decomposed = PolyMatrixRaw::zero(&mlwe_params, 4, 1);
 	
-	for i in 0..4{
-	    poly_b_decomposed.as_mut_slice()[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].copy_from_slice(&decrypted_b_vec[i][0].as_slice());
-	}
+//	for i in 0..4{
+//	    poly_b_decomposed.as_mut_slice()[i*mlwe_params.poly_len..(i+1)*mlwe_params.poly_len].copy_from_slice(&decrypted_b_vec[i][0].as_slice());
+//	}
 
-	let poly_b_composed = &g_exp.ntt() * &poly_b_decomposed.ntt();
+//	let poly_b_composed = &g_exp.ntt() * &poly_b_decomposed.ntt();
 
-	for i in 0..mlwe_params.poly_len{
+//	for i in 0..mlwe_params.poly_len{
 	    //assert_eq!(poly_b_composed.raw().data[i], response_b_simple_transposed.submatrix(0, target_col, 1, 1).data[i]);
-	}
+//	}
 
-	let decrypted_ans = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &poly_composed, &poly_b_composed, &y_client.inner);
-	//println!("{:?}", decrypted_ans[0].as_slice());
+//	let decrypted_ans = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &poly_composed, &poly_b_composed, &y_client.inner);
 
-	for i in 0..mlwe_params.poly_len{
+
+//	for i in 0..mlwe_params.poly_len{
 	    //println!("{}, {}", server.db()[target_row*db_rows + target_col+i], decrypted_ans[0].data[i]);
 	    //assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, decrypted_ans[0].data[i]);// +i = +10
-	}
+//	}
 
 	////////////////////mlwe to rlwe packing//////////////////////////
 
@@ -3548,7 +3543,7 @@ mod test {
 
 	for i in 0..mlwe_params.poly_len{
 	    println!("{}, {}", server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row], decrypted_answer[0].data[i]);
-	    assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, decrypted_answer[0].data[i]);// +i = +10
+	    assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, decrypted_answer[0].data[i]);0
 	}
 	
 
