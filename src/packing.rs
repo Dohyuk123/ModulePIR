@@ -3460,11 +3460,11 @@ mod test {
 
     #[test]
     fn test_mlwe_automorph() {
-	let pt_byte_log2 = 7;
+	let pt_byte_log2 = 2;
 	let params = params_for_scenario(1<<30, 1);
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len = 128;
-	mlwe_params.poly_len_log2 = 7;
+	mlwe_params.poly_len = 1<<pt_byte_log2;
+	mlwe_params.poly_len_log2 = pt_byte_log2;
 	let mut client = Client::init(&params);
 	client.generate_secret_keys();
 
@@ -3490,21 +3490,25 @@ mod test {
 	let mut ct_a = ct.submatrix(0, 0, 1, 1);
 	let mut ct_b = ct.submatrix(1, 0, 1, 1);
 
+	println!("halloo");
 	let mlwe_a = rlwe_to_mlwe_a(&params, &ct_a.raw().as_slice().to_vec(), pt_byte_log2);
 	let mlwe_b = rlwe_to_mlwe_b(&params, &ct_b.raw().as_slice().to_vec(), pt_byte_log2);
+	
 
 	let mut mlwe_a_poly = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
 	let mut mlwe_b_poly = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
 
 	mlwe_a_poly.as_mut_slice().copy_from_slice(&mlwe_a[0..(mlwe_params.poly_len * dimension)]);
 	mlwe_b_poly.as_mut_slice().copy_from_slice(&mlwe_b[0..mlwe_params.poly_len]);
+	println!("hallooo");
 	let mut dec = decrypt_mlwe(&params, &mlwe_params, &mlwe_a_poly.ntt(), &mlwe_b_poly.ntt(), &client);
-
+	println!("hallooo");
 	println!("dec: {:?}", dec.as_slice());
 	
 	let mlwe_a_poly_ntt = mlwe_a_poly.ntt();
 
-	let (decomp_a, auto_a) = mlwe_automorph_a(&mlwe_params, 129, dimension, t_exp, &mlwe_a_poly.ntt(), &expansion_key_a[0], &tables);
+	let (decomp_a, auto_a) = mlwe_automorph_a(&mlwe_params, 5, dimension, t_exp, &mlwe_a_poly.ntt(), &expansion_key_a[0], &tables);
+	println!("hallooo");
 
 	let auto_b = mlwe_automorph_b(&mlwe_params, 129, dimension, t_exp, &mlwe_b_poly.ntt(), &decomp_a, &expansion_key_b[0], &tables);
 

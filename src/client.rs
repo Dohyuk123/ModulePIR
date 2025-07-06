@@ -301,7 +301,7 @@ pub fn decrypt_mlwe<'a> (
     let mut dec_mlwe = PolyMatrixRaw::zero(&mlwe_params, b.rows, b.cols);
     let b_raw = b.raw();
 
-    let mask: u64 = (1u64 << 41) - 1;
+    //let mask: u64 = (1u64 << 41) - 1;
 
     //println!("braw: {}", ((b_raw.data[0] & mask) as f64).log2());
     
@@ -429,40 +429,30 @@ impl<'a> YClient<'a> {
 	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx)); 
 
 	let scale_k = self.params.modulus / self.params.pt_modulus;
-
+	
 	let mut query_vec = vec![0u64; 1<<(dim_log2 + self.params.poly_len_log2)]; // mlwe
-	//for i in 0..128{
-	//    query_vec[i] = (i as u64);
-	//}	
-	query_vec[index * (1<<pt_byte_log2)] = scale_k;
-	//println!("index: {}", index * (1<<pt_byte_log2));
-	//println!("query_vec: {:?}", query_vec.as_slice());
+
+	let mod_inv = invert_uint_mod(1<<(self.params.poly_len_log2 - pt_byte_log2) as u64, self.params.modulus).unwrap();
+	let val_to_enc = multiply_uint_mod(scale_k, mod_inv, self.params.modulus);
+		
+	query_vec[index * (1<<pt_byte_log2)] = val_to_enc;
 
 	let mut plaintext_vec = Vec::new();
 
 	for i in 0..(1<<dim_log2){
 	    let mut plaintext = PolyMatrixRaw::zero(self.params, 1, 1);
-	    //plaintext.as_mut_slice().copy_from_slice(&query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len]);
-	    let mut tmp_plain = Vec::new();//query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len];
+
+	    let mut tmp_plain = Vec::new(); //query_vec[i*self.params.poly_len..(i+1)*self.params.poly_len];
 
 	    for j in 0..self.params.poly_len {
 		tmp_plain.push(query_vec[i*self.params.poly_len + j]);
 	    }
-	    //if (i == 0) {
-		//println!("tmp: {:?}", tmp_plain);
-	//    }
-	    
-	    //mlwe_to_rlwe_b_packed(self.params, &mut plaintext.as_mut_slice(), pt_byte_log2);
-	    mlwe_to_rlwe_b_packed(self.params, &mut tmp_plain, pt_byte_log2); //
 
-	  //  if (i == 0) {
-		//println!("tmp: {:?}", tmp_plain);
-	    //}
+	    mlwe_to_rlwe_b_packed(self.params, &mut tmp_plain, pt_byte_log2); //
 
 	    plaintext.as_mut_slice().copy_from_slice(&tmp_plain);
 	    plaintext_vec.push(plaintext.ntt());
 	}
-	//println!("rlwe: {:?}", plaintext_vec[0].raw().as_slice());
 
 	let mut rlwe_ct_vec = Vec::new();
 	for i in 0..plaintext_vec.len() {
@@ -1286,17 +1276,17 @@ mod test {
     fn test_gadget() {
 	let params = params_for_scenario(1 << 30, 1);
 	let mut mat = PolyMatrixRaw::zero(&params, 4, 1);
-	let g_exp = build_gadget(&params, 1, 3);
-	println!("gadget : {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0]);
+	let g_exp = build_gadget(&params, 1, 4);
+	println!("gadget : {}, {}, {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0], g_exp.get_poly(0, 2)[0], g_exp.get_poly(0, 3)[0]);
 
 	//824634769409 1, 2, 3 low -> high
 
-	mat.get_poly_mut(0, 0)[37] = 824634769409;
+	mat.get_poly_mut(0, 0)[37] = 55710239050809430;
 	mat.get_poly_mut(1, 0)[36] = 824634769409;
 	mat.get_poly_mut(2, 0)[35] = 824634769409;
 	mat.get_poly_mut(3, 0)[34] = 824634769409;
 
-	let mut g_inv_a = PolyMatrixRaw::zero(&params, 12, 1);
+	let mut g_inv_a = PolyMatrixRaw::zero(&params, 16, 1);
 	gadget_invert_rdim(&mut g_inv_a, &mat, 4);
 
 	println!("{}", g_inv_a.get_poly(0, 0)[37]);
@@ -1311,6 +1301,7 @@ mod test {
 	println!("{}", g_inv_a.get_poly(9, 0)[36]);
 	println!("{}", g_inv_a.get_poly(10, 0)[35]);
 	println!("{}", g_inv_a.get_poly(11, 0)[34]);
+	println!("{}", g_inv_a.get_poly(12, 0)[37]);
 	
 	//let a = 
     } 
