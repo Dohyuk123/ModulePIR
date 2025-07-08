@@ -3463,7 +3463,6 @@ mod test {
 	    &params,
 	    params.poly_len_log2,
 	    params.poly_len_log2 - 1,
-	//    mlwe_params.poly_len_log2,
 	    &last_pack_a_vec,
 	    &fake_pack_pub_params,
 	    &y_constants,

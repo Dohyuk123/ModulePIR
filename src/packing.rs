@@ -3784,10 +3784,10 @@ mod test {
 	let mut v_ct = Vec::new();
         let mut b_values = Vec::new();
 	let mut b_poly = PolyMatrixRaw::zero(&params, 1, 1);
-	for i in 0..2{//dimension{
+	for i in 0..dimension{
 	    let mut plaintext = PolyMatrixRaw::zero(&params, 1, 1);
 	    let scale_k = params.modulus / params.pt_modulus;
-	    let mod_inv = invert_uint_mod(1<<(1) as u64, params.modulus).unwrap();
+	    let mod_inv = invert_uint_mod(1<<(params.poly_len_log2 - pt_byte_log2) as u64, params.modulus).unwrap();
 	    for j in 0..pt_byte{
 		let val = (j*dimension + i) as u64;
 		println!("{}", val);
@@ -3809,11 +3809,11 @@ mod test {
 
 	}
 
-	//for i in 2..dimension{
-	//    let mut plaintext = PolyMatrixRaw::zero(&params, 1, 1);
-	//    let mut ct_raw = PolyMatrixRaw::zero(&params, 2, 1);
-	//    v_ct.push(ct_raw.ntt());
-	//}
+	for i in 2..dimension{
+	    let mut plaintext = PolyMatrixRaw::zero(&params, 1, 1);
+	    let mut ct_raw = PolyMatrixRaw::zero(&params, 2, 1);
+	    v_ct.push(ct_raw.ntt());
+	}
 
 	for i in 0..params.poly_len{
 	    b_values.push(b_poly.as_slice()[i]);
@@ -3822,9 +3822,9 @@ mod test {
 	let (precomp_res, precomp_vals, precomp_tables) = precompute_pack_mlwe_to_rlwe(
 	    &params,
 	    params.poly_len_log2,
-	    params.poly_len_log2 - 1,
+	    //params.poly_len_log2 - 1,
 	    //pt_byte_log2 + 1,
-	    //pt_byte_log2,
+	    pt_byte_log2,
 	    &v_ct,
 	    &fake_pack_pub_params,
 	    &y_constants,
@@ -3833,9 +3833,9 @@ mod test {
 	let packed = pack_using_precomp_vals_mlwe_to_rlwe(
 	    &params,
 	    params.poly_len_log2,
-	    params.poly_len_log2 - 1,
+	    //params.poly_len_log2 - 1,
 	    //pt_byte_log2 + 1,
-	    //pt_byte_log2,
+	    pt_byte_log2,
 	    &pack_pub_params_row_1s,
 	    &b_values,
 	    &precomp_res,
