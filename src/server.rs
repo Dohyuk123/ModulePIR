@@ -3130,6 +3130,8 @@ mod test {
 	params.pt_modulus = 1<<16;
 
 	println!("{}, {}", params.get_q_prime_1(), params.get_q_prime_2());	
+	let rlwe_q_prime_1 = params.get_q_prime_1();
+	let rlwe_q_prime_2 = params.get_q_prime_2();
 
 	//256MB: 3, 2 //1GB: 4, 3 //8GB: 5, 5
 	params.db_dim_1 = 3;
@@ -3437,14 +3439,33 @@ mod test {
 
 	let end = Instant::now();
 
+	let mut packed_mod_switched_a = Vec::with_capacity(packed_b.len());
+	for ct in packed_b.iter() {
+	    let res = ct.raw();
+	    let res_switched = res.switch(rlwe_q_prime_1, rlwe_q_prime_2);
+	    packed_mod_switched_a.push(res_switched);
+	}
+	
+	let res_b = last_packed.raw();
+	let res_switched_b = res_b.switch(rlwe_q_prime_1, rlwe_q_prime_2);
+	
+	
 
 	//////////////////final debug//////////////////
 	//packed_b : a parts
 
+	let mut double_response_a = Vec::new();
+	for ct_bytes in packed_mod_switched_a.iter() {
+	    let ct = PolyMatrixRaw::recover(&params, rlwe_q_prime_1, rlwe_q_prime_2, ct_bytes);
+	    double_response_a.push(ct);
+	}
+
+	
+
 	let mut decomposed_a = PolyMatrixRaw::zero(&mlwe_params, 4, dimension);
 
 	for i in 0..4{
-	    let decrypt_a_parts = decrypt_ct_reg_measured(&y_client.inner, &params, &packed_b[i], 0);
+	    let decrypt_a_parts = decrypt_ct_reg_measured(&y_client.inner, &params, &double_response_a[i].ntt(), 0);
 	    let mut poly_temp = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
 	    for j in 0..dimension{
 		for k in 0..mlwe_params.poly_len{
@@ -3465,7 +3486,10 @@ mod test {
 
 	//last_packed
 
-	let decrypt_b_part = decrypt_ct_reg_measured(&y_client.inner, &params, &last_packed, 0);
+	
+	let double_response_b = PolyMatrixRaw::recover(&params, rlwe_q_prime_1, rlwe_q_prime_2, &res_switched_b);
+
+	let decrypt_b_part = decrypt_ct_reg_measured(&y_client.inner, &params, &double_response_b.ntt(), 0);
 	let mut poly_temp_b = PolyMatrixRaw::zero(&mlwe_params, 4, 1);
 	for j in 0..4{
 	    for k in 0..mlwe_params.poly_len{
