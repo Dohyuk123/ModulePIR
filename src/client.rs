@@ -461,7 +461,6 @@ impl<'a> YClient<'a> {
 	}
 
 	let mut query_poly = PolyMatrixRaw::zero(mlwe_params, 1<<(dim_log2 + self.params.poly_len_log2 - pt_byte_log2), 1);
-	println!("length: {}", 1<<(dim_log2 + self.params.poly_len_log2 - pt_byte_log2));
 
 	for i in 0..query_poly.as_slice().len()/self.params.poly_len {
 	    let mlwe = rlwe_to_mlwe_b(self.params, &rlwe_ct_vec[i].as_slice().to_vec(), pt_byte_log2);
@@ -591,7 +590,7 @@ impl<'a> YClient<'a> {
 
             lwes
         } else {
-	    println!("else");
+	    //println!("else");
             let out = self.generate_query_impl_mlwe(public_seed_idx, dim_log2, packing, pt_byte_log2, index_row);	
             let lwes = self.rlwes_to_lwes(&out);
             lwes

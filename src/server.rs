@@ -503,7 +503,7 @@ where
         } else {
             1 << (params.db_dim_2 + params.poly_len_log2)
         };
-	println!("poly len: {}", params.poly_len_log2);
+	//println!("poly len: {}", params.poly_len_log2);
 	
 	//println!("padrows: {}", pad_rows);
 
@@ -541,7 +541,7 @@ where
         } else {
             let lwe_params = LWEParams::default();
             let pt_bits = (params.pt_modulus as f64).log2().floor() as usize;
-	    println!("pt_mod: {}", params.pt_modulus);
+	    //println!("pt_mod: {}", params.pt_modulus);
             let blowup_factor = lwe_params.q2_bits as f64 / pt_bits as f64;
             let mut smaller_params = params.clone();
             smaller_params.db_dim_1 = params.db_dim_2;
@@ -550,10 +550,10 @@ where
                 .log2()
                 .ceil() as usize;
 
-	    println!("lwe_n: {}, polylen: {}, db_dim_2: {}", lwe_params.n, params.poly_len, smaller_params.db_dim_2);
+	    //println!("lwe_n: {}, polylen: {}, db_dim_2: {}", lwe_params.n, params.poly_len, smaller_params.db_dim_2);
 
             let out_rows = 1 << (smaller_params.db_dim_2 + params.poly_len_log2);
-	    println!("out_rows: {}, params.poly_len_log2: {}", out_rows, params.poly_len_log2);
+	    //println!("out_rows: {}, params.poly_len_log2: {}", out_rows, params.poly_len_log2);
             assert_eq!(smaller_params.db_dim_1, params.db_dim_2);
             assert!(out_rows as f64 >= (blowup_factor * (lwe_params.n + 1) as f64));
             smaller_params
@@ -707,12 +707,12 @@ where
                 result.extend(sum_raw.as_slice());
             }
         }
-	println!("result length: {}", result.len());
+	//println!("result length: {}", result.len());
 
         // result
         let now = Instant::now();
         let res = transpose_generic(&result, col_range.len(), self.params.poly_len);
-        debug!("transpose in {} us", now.elapsed().as_micros());
+        //debug!("transpose in {} us", now.elapsed().as_micros());
         res
     }
 
@@ -749,7 +749,7 @@ where
 
     pub fn answer_hint_ring(&self, public_seed_idx: u8, cols: usize) -> Vec<u64> {
         let preprocessed_query = self.generate_pseudorandom_query(public_seed_idx);
-	println!("{}", preprocessed_query[0].raw().data[1000]);
+	//println!("{}", preprocessed_query[0].raw().data[1000]);
 
         let res = self.multiply_with_db_ring(&preprocessed_query, 0..cols, public_seed_idx);
 
@@ -818,14 +818,14 @@ where
 
         let lwe_params = LWEParams::default();
         let n = lwe_params.n;
-	println!("n hint 0: {}", n);
+	//println!("n hint 0: {}", n);
         let conv = Convolution::new(n);
-	println!("conv modulus: {}", conv.params().modulus);
+	//println!("conv modulus: {}", conv.params().modulus);
 
         let mut hint_0 = vec![0u64; n * db_cols];
 
         let convd_len = conv.params().crt_count * conv.params().poly_len;
-	println!("convd_len: {}, conv_polylen: {}", convd_len, conv.params().poly_len);
+	//println!("convd_len: {}, conv_polylen: {}", convd_len, conv.params().poly_len);
 
         let mut rng_pub = ChaCha20Rng::from_seed(get_seed(SEED_0));
 
@@ -847,7 +847,7 @@ where
         let log2_max_adds = log2_modulus - log2_conv_output - 1;
         assert!(log2_max_adds > 0);
         let max_adds = 1 << log2_max_adds;
-	println!("lwe_modulus: {}", lwe_params.modulus);
+	//println!("lwe_modulus: {}", lwe_params.modulus);
 
         for col in 0..db_cols {
             let mut tmp_col = vec![0u64; convd_len];
@@ -978,17 +978,17 @@ where
         // LWE reduced moduli
         let lwe_q_prime_bits = lwe_params.q2_bits as usize;
         let lwe_q_prime = lwe_params.get_q_prime_2();
-	println!("lwe_q_prime: {}", lwe_q_prime);
+	//println!("lwe_q_prime: {}", lwe_q_prime);
 	
 
         // The number of bits represented by a plaintext RLWE coefficient
         let pt_bits = (params.pt_modulus as f64).log2().floor() as usize;
-	println!("pt bits : {}, lwe_q_prim: {}", pt_bits, lwe_q_prime_bits);
+	//println!("pt bits : {}, lwe_q_prim: {}", pt_bits, lwe_q_prime_bits);
         // assert_eq!(pt_bits, 16);
 
         // The factor by which ciphertext values are bigger than plaintext values
         let blowup_factor = lwe_q_prime_bits as f64 / pt_bits as f64;
-        debug!("blowup_factor: {}", blowup_factor);
+        //debug!("blowup_factor: {}", blowup_factor);
         // assert!(blowup_factor.ceil() - blowup_factor >= 0.05);
 
         // The starting index of the final value (the '1' in lwe_params.n + 1)
@@ -996,7 +996,7 @@ where
         let special_offs =
             ((lwe_params.n * lwe_q_prime_bits) as f64 / pt_bits as f64).ceil() as usize;
         let special_bit_offs = special_offs * pt_bits;
-	println!("n: {}, q_prime_bits: {}, pt_bits: {}, special_off: {}, special_bit_offs: {}", lwe_params.n, lwe_q_prime_bits, pt_bits , special_offs, special_bit_offs);
+	//println!("n: {}, q_prime_bits: {}, pt_bits: {}, special_off: {}, special_bit_offs: {}", lwe_params.n, lwe_q_prime_bits, pt_bits , special_offs, special_bit_offs);
 
         // Parameters for the second round (the "DoublePIR" round)
         let mut smaller_params = params.clone();
@@ -1005,12 +1005,12 @@ where
             / params.poly_len as f64)
             .log2()
             .ceil() as usize;
-	println!("blowup: {}, lwe_params.n: {}, poly_len: {}", blowup_factor, lwe_params.n, params.poly_len);
+	//println!("blowup: {}, lwe_params.n: {}, poly_len: {}", blowup_factor, lwe_params.n, params.poly_len);
 
         let out_rows = 1 << (smaller_params.db_dim_2 + params.poly_len_log2);
-	println!("outrows: {}", out_rows);
+	//println!("outrows: {}", out_rows);
         let rho = 1 << smaller_params.db_dim_2;
-	println!("rho: {}", rho);
+	//println!("rho: {}", rho);
         assert_eq!(smaller_params.db_dim_1, params.db_dim_2);
         assert!(out_rows as f64 >= (blowup_factor * (lwe_params.n + 1) as f64));
 
@@ -1083,7 +1083,7 @@ where
             SEED_1,
             1 << (smaller_server.params.db_dim_2 + smaller_server.params.poly_len_log2),
         );
-	println!("seed: {}, {}", SEED_0, SEED_1);
+	//println!("seed: {}, {}", SEED_0, SEED_1);
         assert_eq!(hint_1.len(), params.poly_len * out_rows);
         assert_eq!(hint_1[special_offs], 0);
         assert_eq!(hint_1[special_offs + 1], 0);
@@ -1208,7 +1208,7 @@ where
         // Set up some parameters
 
         let params = self.params;
-	println!("params.ptbyte: {}", params.pt_modulus);
+	//println!("params.ptbyte: {}", params.pt_modulus);
         let lwe_params = LWEParams::default();
 
         let db_cols = self.db_cols();
@@ -1221,7 +1221,7 @@ where
         let lwe_q_prime_bits = lwe_params.q2_bits as usize;
         let lwe_q_prime = lwe_params.get_q_prime_2();
 
-	println!("rlwe prime 1: {}, rlwe prime 2: {}, lwe prime2: {}", rlwe_q_prime_1, rlwe_q_prime_2, lwe_q_prime);
+	//println!("rlwe prime 1: {}, rlwe prime 2: {}, lwe prime2: {}", rlwe_q_prime_1, rlwe_q_prime_2, lwe_q_prime);
 
         // The number of bits represented by a plaintext RLWE coefficient
         let pt_bits = (params.pt_modulus as f64).log2().floor() as usize;
@@ -2226,12 +2226,12 @@ where
 
         // The number of bits represented by a plaintext RLWE coefficient
         let pt_bits = (params.pt_modulus as f64).log2().floor() as usize;
-	println!("pt bits : {}, lwe_q_prim: {}", pt_bits, lwe_q_prime_bits);
+	//println!("pt bits : {}, lwe_q_prim: {}", pt_bits, lwe_q_prime_bits);
         // assert_eq!(pt_bits, 16);
 
         // The factor by which ciphertext values are bigger than plaintext values
         let blowup_factor = lwe_q_prime_bits as f64 / pt_bits as f64;
-        debug!("blowup_factor: {}", blowup_factor);
+        //debug!("blowup_factor: {}", blowup_factor);
         // assert!(blowup_factor.ceil() - blowup_factor >= 0.05);
 
         // The starting index of the final value (the '1' in lwe_params.n + 1)
@@ -3060,7 +3060,12 @@ mod test {
 	
 	};
 
+	let simple_start = Instant::now();
+
 	let response: AlignedMemory64 = server.answer_query(packed_query_col.as_slice());//buf.as_slice()); // simple pir response
+	let simple_end = Instant::now();
+
+	println!("{:?}", simple_end - simple_start);
 
 	let mut ct_vec_a = Vec::new();
 	let mut ct_vec_b = Vec::new();
@@ -3107,21 +3112,29 @@ mod test {
 
 	let (result_a, decomp_a_vec) = prep_pack_lwe_to_mlwe(&params, &mlwe_params, dimension, t_exp, &expansion_key_a, &ct_a_128, &auto_table, &expansion_table_neg, &expansion_table_pos);
 
+
 	let result_b = pack_lwes_to_mlwe(&params, &mlwe_params, dimension, t_exp, &ct_b_128, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, &decomp_a_vec);
+	
 
 	let mut dec = decrypt_mlwe(&params, &mlwe_params, &result_a, &result_b.ntt(), &y_client.inner);
-	println!("result: {:?}", dec.as_slice());
+	//println!("result: {:?}", dec.as_slice());
 
 /////////////////////multiple////////////////////////	
 
+	//let start = Instant::now();
 	let (result_a_tmps, decomps) = prep_pack_lwes_to_mlwe_db(&params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a,  &auto_table, &expansion_table_neg, &expansion_table_pos);
+	//let end = Instant::now();
+	//println!("{:?}", end - start);
 
+	let start = Instant::now();
 	let result_b_tmps = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomps);
+	let end = Instant::now();
+	println!("{:?}", end - start);
 
 	let decrypted = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &result_a_tmps, &result_b_tmps.ntt(), &y_client.inner);
 
 	for i in 0..decrypted.len() {
-	    println!("{:?}", decrypted[i].as_slice());
+	    //println!("{:?}", decrypted[i].as_slice());
 	}
 	
     }
@@ -3129,20 +3142,22 @@ mod test {
     #[test]
     fn test_whole_protocol(){ // start : row: 16384 / second : col:8192
 
+	println!("creating server");
+
 	////////first settings
 	let mut params = params_for_scenario(1<<30, 1);
 	params.pt_modulus = 1<<16;
 
-	println!("{}, {}", params.get_q_prime_1(), params.get_q_prime_2());	
+	//println!("{}, {}", params.get_q_prime_1(), params.get_q_prime_2());	
 	let rlwe_q_prime_1 = params.get_q_prime_1();
 	let rlwe_q_prime_2 = params.get_q_prime_2();
 
 	//256MB: 3, 2 //1GB: 4, 3 //8GB: 5, 5
-	params.db_dim_1 = 5;
-	params.db_dim_2 = 5;
+	params.db_dim_1 = 4;
+	params.db_dim_2 = 3;
 
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len_log2 = 7;
+	mlwe_params.poly_len_log2 = 9;
 	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
 	
 	let mut simple_params = mlwe_params.clone();
@@ -3189,6 +3204,8 @@ mod test {
 	let mut g_inv_b = PolyMatrixRaw::zero(&simple_params, 2, db_cols / mlwe_params.poly_len);
 	let mut g_inv_b_56 = PolyMatrixRaw::zero(&mlwe_params, 2, db_cols / mlwe_params.poly_len);
 
+	println!("making keyswitching keys");
+
 	////////////////////////////for keyswitching///////////////////
 	let t_exp = params.t_exp_left;
 	let auto_table = generate_automorph_tables_brute_force(&mlwe_params); //automorphism table for mlwe
@@ -3229,6 +3246,8 @@ mod test {
 	///////////////////////////////////////////////////////////////
 	///////////////////////hint preprocessing//////////////////////
 	///////////////////////////////////////////////////////////////
+
+	println!("offline preprocessing");
 
 
 	let hint = server.answer_hint_ring(SEED_1, db_cols);
@@ -3299,6 +3318,8 @@ mod test {
 	//////////////////////query////////////////////////////////////
 
 ////////////////////////////////client creates query////////////////////////////
+
+	println!("making query");
 	let val_row: u32 = rng.gen_range(0..(db_rows as u32));
 	let val_col: u16 = rng.gen_range(0..((db_cols / mlwe_params.poly_len) as u16));
 	let target_row = val_row as usize;
@@ -3327,6 +3348,8 @@ mod test {
 
 ///////////////////////////////response starts/////////////////////////////
 
+	println!("online computation");
+
 	let start = Instant::now();
 
 	//simple response
@@ -3337,6 +3360,8 @@ mod test {
 	//pack simple response into mlwe
 	let response_b_simple = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
 
+	let st = Instant::now();
+
 	let transposed_array_b = transpose_poly(&mlwe_params, &response_b_simple);
 	response_b_simple_transposed.as_mut_slice().copy_from_slice(transposed_array_b.as_slice());
 
@@ -3345,7 +3370,6 @@ mod test {
 	    response_b_simple_rescaled.data[i] = rescale(response_b_simple_transposed.data[i], params.modulus, rlwe_q_prime_1);
 	}
 	let res_end = Instant::now();
-	println!("{:?}", res_end - res_start);
 
 	gadget_invert_rdim(&mut g_inv_b, &response_b_simple_rescaled, 1); // db * b1 ->gadget : g_invb
 
@@ -3381,7 +3405,7 @@ mod test {
 
 	////////////////////mlwe to rlwe packing//////////////////////////
 	let packing_start = Instant::now();
-	//let mut packed_b = Vec::new();//mlwe to rlwe
+
 	for num in 0..2{
 	    let mut b_values = Vec::new();
 	    let mut tmp_rlwe_poly = PolyMatrixRaw::zero(&params, 1, 1);
@@ -3442,8 +3466,6 @@ mod test {
 
 ///////////////////////////////////////////////////////////////////
 
-	//let mut last_b_values = Vec::new();
-	//let mut tmp_last_rlwe_poly = PolyMatrixRaw::zero(&params, 1, 1);
 	for num in 0..2{
 	    let mut last_mlwe_tmp = response_mult_vec[num].submatrix(0, 0, 1, 1);
 	    let last_mlwe_tmp_raw = last_mlwe_tmp.raw();
@@ -3482,10 +3504,11 @@ mod test {
 	let res_b = last_packed.raw();
 	let res_switched_b = res_b.switch(rlwe_q_prime_1, rlwe_q_prime_2);
 	
-	//println!("hellooo");
+	let end = Instant::now();
 
 	//////////////////final debug//////////////////
-	//packed_b : a parts
+
+	println!("decrypting");
 
 	let mut double_response_a = Vec::new();
 	for ct_bytes in packed_mod_switched_a.iter() {
@@ -3504,7 +3527,6 @@ mod test {
 		}
 	    }
 	    for j in 0..params.poly_len{
-		//println!("{}", j);
 	        assert_eq!(poly_temp.data[j], hint_0s[i].raw().submatrix(0, target_col, dimension, 1).data[j]);
 	    }
 	    decomposed_a.as_mut_slice()[i*params.poly_len..(i+1)*params.poly_len].copy_from_slice(&poly_temp.as_slice());
@@ -3537,7 +3559,7 @@ mod test {
 		poly_temp_b.data[mlwe_params.poly_len*j+k] = decrypt_b_part.as_slice()[k*dimension+j];
 	    }
 	    for k in 0..mlwe_params.poly_len {
-		//assert_eq!(poly_temp_b.as_slice()[j*mlwe_params.poly_len..(j+1)*mlwe_params.poly_len][k], response_0s[j].submatrix(0, target_col, 1, 1).raw().data[k]);
+		assert_eq!(poly_temp_b.as_slice()[j*mlwe_params.poly_len..(j+1)*mlwe_params.poly_len][k], response_0s[j].submatrix(0, target_col, 1, 1).raw().data[k]);
 	    }
 	}
 
@@ -3565,7 +3587,7 @@ mod test {
 
 	println!("simple time: {:?}", start_0 - start);
 
-	println!("first packing time: {:?}", start_1 - start_0);
+	println!("first packing time: {:?}", st - start_0);
 	
 	println!("double time : {:?}", packing_start - start_1); 
 
