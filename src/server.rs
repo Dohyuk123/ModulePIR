@@ -3147,17 +3147,16 @@ mod test {
 	////////first settings
 	let mut params = params_for_scenario(1<<30, 1);
 	params.pt_modulus = 1<<16;
-
-	//println!("{}, {}", params.get_q_prime_1(), params.get_q_prime_2());	
+	
 	let rlwe_q_prime_1 = params.get_q_prime_1();
 	let rlwe_q_prime_2 = params.get_q_prime_2();
 
 	//256MB: 3, 2 //1GB: 4, 3 //8GB: 5, 5
-	params.db_dim_1 = 4;
-	params.db_dim_2 = 3;
+	params.db_dim_1 = 3;
+	params.db_dim_2 = 2;
 
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len_log2 = 9;
+	mlwe_params.poly_len_log2 = 8;
 	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
 	
 	let mut simple_params = mlwe_params.clone();
@@ -3207,6 +3206,7 @@ mod test {
 	println!("making keyswitching keys");
 
 	////////////////////////////for keyswitching///////////////////
+	let tmp_scale = 1<<(params.poly_len_log2 -mlwe_params.poly_len_log2-1);
 	let t_exp = params.t_exp_left;
 	let auto_table = generate_automorph_tables_brute_force(&mlwe_params); //automorphism table for mlwe
 	let pack_seed = [1u8; 32];
@@ -3221,7 +3221,7 @@ mod test {
 	let pack_pub_params = raw_generate_expansion_params( // mlwe to rlwe compression key
             &params,
             y_client.inner.get_sk_reg(),
-            params.poly_len_log2,
+            mlwe_params.poly_len_log2,
             params.t_exp_left,
             &mut ChaCha20Rng::from_entropy(),
             &mut ChaCha20Rng::from_seed(pack_seed),
@@ -3446,19 +3446,24 @@ mod test {
 	    let mut input_poly_tmp = PolyMatrixRaw::zero(&params, 1, 1);
 	    
 	    mlwe_to_rlwe_a(&params, &mut input_poly_tmp, response_0_times_hint_double_vec[i].raw().as_slice().to_vec(), mlwe_params.poly_len_log2);
-	    input_poly.as_mut_slice()[0..params.poly_len].copy_from_slice(&input_poly_tmp.as_slice());
+	    for z in 0..params.poly_len {
+        	let val = barrett_reduction_u128(&params, input_poly_tmp.as_slice()[z] as u128 * tmp_scale as u128);
+        	input_poly.data[z] += val;
+        	if input_poly.data[z] >= params.modulus {
+           	    input_poly.data[z] -= params.modulus;
+        	}
+    	    }
+	    //input_poly.as_mut_slice()[0..params.poly_len].copy_from_slice(&input_poly_tmp.as_slice());
+
 	    last_pack_a_vec.push(input_poly.ntt());
 	}
 
-	for j in 2..dimension{
-	    let mut input_poly = PolyMatrixRaw::zero(&params, 2, 1);
-	    last_pack_a_vec.push(input_poly.ntt());
-	}
 
         let (last_precomp_res, last_precomp_vals, last_precomp_tables) = precompute_pack_mlwe_to_rlwe(
 	    &params,
 	    params.poly_len_log2,
-	    mlwe_params.poly_len_log2,
+	    params.poly_len_log2 - 1,
+	//    mlwe_params.poly_len_log2,
 	    &last_pack_a_vec,
 	    &fake_pack_pub_params,
 	    &y_constants,
@@ -3470,7 +3475,12 @@ mod test {
 	    let mut last_mlwe_tmp = response_mult_vec[num].submatrix(0, 0, 1, 1);
 	    let last_mlwe_tmp_raw = last_mlwe_tmp.raw();
 	    for j in 0..mlwe_params.poly_len{
-		tmp_last_rlwe_poly.as_mut_slice()[j*dimension + num] = last_mlwe_tmp_raw.as_slice()[j];
+		let val = barrett_reduction_u128(&params, last_mlwe_tmp_raw.as_slice()[j] as u128 * tmp_scale as u128);
+		let idx = j*dimension + num;
+		tmp_last_rlwe_poly.data[idx] += val;
+		if tmp_last_rlwe_poly.data[idx] >= params.modulus {
+		    tmp_last_rlwe_poly.data[idx] -= params.modulus;
+		}
 	    }
 	}
 
@@ -3481,7 +3491,7 @@ mod test {
 	let last_packed = pack_using_precomp_vals_mlwe_to_rlwe(
 	    &params,
 	    params.poly_len_log2,
-	    mlwe_params.poly_len_log2,
+	    params.poly_len_log2 - 1,
 	    &pack_pub_params_row_1s,
 	    &last_b_values,
 	    &last_precomp_res,
@@ -3581,8 +3591,7 @@ mod test {
 	let decrypted_answer = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &composed_a_recovered.ntt(), &composed_b_recovered.ntt(), &y_client.inner);
 
 	for i in 0..mlwe_params.poly_len{
-	    //println!("{}, {}", server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row], decrypted_answer[0].data[i]);
-	    assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, decrypted_answer[0].data[i]);// +i = +10
+	    assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, decrypted_answer[0].data[i]);
 	}
 
 	println!("simple time: {:?}", start_0 - start);
