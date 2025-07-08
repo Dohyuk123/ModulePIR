@@ -2389,7 +2389,7 @@ mod test {
     use spiral_rs::{client::Client, number_theory::invert_uint_mod, util::get_test_params};
 
     use crate::{
-        client::*, params::params_for_scenario,
+        client::*, params::*,
         server::*,
     };
 
@@ -3312,6 +3312,9 @@ mod test {
 	let mut mlwe_params = params.clone();
 	let mut client = Client::init(&params);
 	client.generate_secret_keys();
+
+	let rlwe_q_prime_1 = params.get_q_prime_1();
+	let rlwe_q_prime_2 = params.get_q_prime_2();
 	
 	let pack_seed = [1u8; 32];
 	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
@@ -3340,9 +3343,49 @@ mod test {
 	ct_mlwe_a.as_mut_slice().copy_from_slice(&ct_mlwe_poly_a);
 	ct_mlwe_b.as_mut_slice().copy_from_slice(&ct_mlwe_poly_b);
 
-	let mut dec = decrypt_mlwe(&params, &mlwe_params, &ct_mlwe_a.ntt(), &ct_mlwe_b.ntt(), &client);
+	let dimension = params.poly_len / mlwe_params.poly_len;
 
-	//println!("result ct : {:?}", dec.as_slice());
+	let mut ct_coeff = PolyMatrixRaw::zero(&params, 2, 1);
+	ct_coeff.as_mut_slice()[0..params.poly_len].copy_from_slice(&ct_mlwe_a.submatrix(0, 0, 1, dimension).as_slice());
+	ct_coeff.as_mut_slice()[params.poly_len..params.poly_len + mlwe_params.poly_len].copy_from_slice(&ct_mlwe_b.submatrix(0, 0, 1, 1).as_slice());
+
+	
+
+	let mut ct_mlwe_a_res = PolyMatrixRaw::zero(&mlwe_params, 1, params.poly_len / mlwe_params.poly_len);
+	let mut ct_mlwe_b_res = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
+
+	for z in 0..params.poly_len {
+	    let val = ct_coeff.get_poly(0, 0)[z];
+	    let val_rescaled = rescale(val, params.modulus, rlwe_q_prime_2);
+	    ct_mlwe_a_res.data[z] = val;
+	}
+	for z in 0..mlwe_params.poly_len{
+	    let val = ct_coeff.get_poly(1, 0)[z];
+	    let val_rescaled = rescale(val, params.modulus, rlwe_q_prime_1);
+	    ct_mlwe_b_res.data[z] = val;
+	}
+
+	let mut ct_mlwe_a_recovered = PolyMatrixRaw::zero(&mlwe_params, 1, params.poly_len / mlwe_params.poly_len);
+	let mut ct_mlwe_b_recovered = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
+
+	for z in 0..params.poly_len {
+	    let val = ct_mlwe_a_res.data[z];
+	    let val_rescaled = rescale(val, rlwe_q_prime_2, params.modulus);
+	    ct_mlwe_a_recovered.data[z] = val;
+	}
+	for z in 0..mlwe_params.poly_len{
+	    let val = ct_mlwe_b_res.data[z];
+	    let val_rescaled = rescale(val, rlwe_q_prime_1, params.modulus);
+	    ct_mlwe_b_recovered.data[z] = val;
+	}
+
+	let mut dec_1 = decrypt_mlwe(&params, &mlwe_params, &ct_mlwe_a_recovered.submatrix(0, 0, 1, params.poly_len / mlwe_params.poly_len).ntt(), &ct_mlwe_b_recovered.submatrix(0, 0, 1, 1).ntt(), &client);
+
+	println!("result_ct: {:?}", dec_1.as_slice());
+
+	let mut dec = decrypt_mlwe(&params, &mlwe_params, &ct_mlwe_a.submatrix(0, 0, 1, params.poly_len / mlwe_params.poly_len).ntt(), &ct_mlwe_b.submatrix(0, 0, 1, 1).ntt(), &client);
+
+	println!("result ct : {:?}", dec.as_slice());
 
     }
 

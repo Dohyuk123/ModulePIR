@@ -3011,6 +3011,10 @@ mod test {
 	let mut params = params_for_scenario(1<<30, 1);
 	params.pt_modulus = 1<<16;
 
+	let mut simple_params = params.clone();
+	simple_params.modulus = 1<<30;
+	simple_params.modulus_log2 = 30;
+
 	let mut mlwe_params = params.clone(); // create mlwe parameter
 	mlwe_params.poly_len_log2 = 7;
 	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
@@ -3138,7 +3142,7 @@ mod test {
 	params.db_dim_2 = 2;
 
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len_log2 = 4;
+	mlwe_params.poly_len_log2 = 7;
 	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
 	let dimension = params.poly_len / mlwe_params.poly_len;
 

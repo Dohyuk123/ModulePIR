@@ -1309,6 +1309,7 @@ mod test {
     #[test]
     fn test_transpose_poly() {
 	let params = params_for_scenario(1<<30, 1);
+	let mut new_params = params.clone();
 	let mut mat = PolyMatrixRaw::random(&params, 8, 4);
 
 	let poly_len = params.poly_len;
@@ -1327,6 +1328,21 @@ mod test {
 	println!("{:?}", end - start);
 
 	println!("{}, {}", row, col);
+
+	new_params.modulus = 1<<30;
+	new_params.modulus_log2 = 30;
+	println!("{:?}", new_params.modulus);
+
+	let g_exp = build_gadget(&new_params, 1, 2);
+
+	println!("gadget : {}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0]);
+
+	let mut poly_tmp = PolyMatrixRaw::zero(&new_params, 1, 1);
+	poly_tmp.data[0] = 131081;
+	let mut g_inv = PolyMatrixRaw::zero(&new_params, 2, 1);
+	gadget_invert_rdim(&mut g_inv, &poly_tmp, 1);
+
+	println!("{}, {}", g_inv.data[0], g_inv.data[2048]);
 
 	//for c in 0..col{
 	//    for r in 0..row{
