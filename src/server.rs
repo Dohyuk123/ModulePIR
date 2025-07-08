@@ -3179,13 +3179,11 @@ mod test {
 	let mut y_client = YClient::new(&mut client, &params);
 
 	let g_exp = build_gadget(&simple_params, 1, 2); // for gadget decomposition
-	println!("{}, {}", g_exp.get_poly(0, 0)[0], g_exp.get_poly(0, 1)[0]);
 	
 	let mut g_exp_56 = PolyMatrixRaw::zero(&mlwe_params, 1, 2);
 	g_exp_56.as_mut_slice().copy_from_slice(&g_exp.as_slice());
 	let g_exp_56_ntt = g_exp_56.ntt();
 
-	//let g_exp_simple = build_gadget(&simple_params, 1, 2);
 	let mut g_inv_a = PolyMatrixRaw::zero(&simple_params, dimension * 2, db_cols / mlwe_params.poly_len);
 	let mut g_inv_a_56 = PolyMatrixRaw::zero(&mlwe_params, dimension * 2, db_cols / mlwe_params.poly_len);
 	let mut g_inv_b = PolyMatrixRaw::zero(&simple_params, 2, db_cols / mlwe_params.poly_len);
@@ -3249,11 +3247,7 @@ mod test {
 	    response_a_simple_raw_rescaled.data[i] = rescale(response_a_simple_raw_transposed.data[i], params.modulus, rlwe_q_prime_2);
 	}
 
-	println!("rescaled: {}, {}", response_a_simple_raw_rescaled.data[0], response_a_simple_raw_transposed.data[0]);
-	
 	gadget_invert_rdim(&mut g_inv_a, &response_a_simple_raw_rescaled, dimension);
-
-	println!("{}", g_inv_a.data[0]);
 
 	g_inv_a_56.as_mut_slice().copy_from_slice(&g_inv_a.as_slice());
 
@@ -3320,6 +3314,7 @@ mod test {
 
 ////////////////////////////////things to create before response////////////////////////////////
 	let mut response_b_simple_transposed = PolyMatrixRaw::zero(&mlwe_params, 1, db_cols / mlwe_params.poly_len);
+	let mut response_b_simple_rescaled = PolyMatrixRaw::zero(&simple_params, 1, db_cols / mlwe_params.poly_len);
 
 	let mut response_0s = Vec::new(); // decomped response lwe
 	let mut response_0_times_hint_double_vec = Vec::new(); // b1 times A2
@@ -3341,17 +3336,16 @@ mod test {
 
 	//pack simple response into mlwe
 	let response_b_simple = pack_lwes_to_mlwe_db(&params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
-	
-	//let mut response_b_simple_transposed = PolyMatrixRaw::zero(&mlwe_params, 1, db_cols / mlwe_params.poly_len);//response_b_simple.get_cols(), response_b_simple.get_rows());
 
 	let transposed_array_b = transpose_poly(&mlwe_params, &response_b_simple);
 	response_b_simple_transposed.as_mut_slice().copy_from_slice(transposed_array_b.as_slice());
 
-	let mut response_b_simple_rescaled = PolyMatrixRaw::zero(&simple_params, response_b_simple_transposed.get_rows(), response_b_simple_transposed.get_cols());
-
+	let res_start = Instant::now();
 	for i in 0..response_b_simple_rescaled.as_slice().len() {
 	    response_b_simple_rescaled.data[i] = rescale(response_b_simple_transposed.data[i], params.modulus, rlwe_q_prime_1);
 	}
+	let res_end = Instant::now();
+	println!("{:?}", res_end - res_start);
 
 	gadget_invert_rdim(&mut g_inv_b, &response_b_simple_rescaled, 1); // db * b1 ->gadget : g_invb
 
