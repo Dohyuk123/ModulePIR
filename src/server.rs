@@ -3138,7 +3138,7 @@ mod test {
 	params.db_dim_2 = 2;
 
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len_log2 = 7;
+	mlwe_params.poly_len_log2 = 4;
 	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
 	let dimension = params.poly_len / mlwe_params.poly_len;
 
@@ -3438,6 +3438,8 @@ mod test {
 	);
 
 	let end = Instant::now();
+
+	//modulus switch
 
 	let mut packed_mod_switched_a = Vec::with_capacity(packed_b.len());
 	for ct in packed_b.iter() {
