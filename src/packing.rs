@@ -384,65 +384,7 @@ pub fn prep_pack_lwe_to_mlwe<'a>(
     (working_set[0].clone(), decomp_a_vec)
 }
 
-pub fn pack_lwes_to_mlwe_tmp<'a>(
-    mlwe_params: &'a Params,
-    dimension : usize,
-    t_exp: usize, 
-    //mlwe_a_to_pack: &[PolyMatrixNTT<'a>],
-    working_set: &mut [PolyMatrixNTT<'a>],
-    pub_param: &[PolyMatrixNTT<'a>],
-    auto_table: &[Vec<usize>],
-    expansion_table_neg: &[PolyMatrixNTT<'a>],
-    expansion_table_pos: &[PolyMatrixNTT<'a>],
-    decomp_a_vec : &[PolyMatrixNTT<'a>],
-) -> PolyMatrixNTT<'a> {
-    let mut pos_times_ct_odd = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
-    let mut neg_times_ct_odd = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
-    let mut ct_sum_1 = PolyMatrixNTT::zero(&mlwe_params, 1, 1);
-    //let mut decomp_a_vec = Vec::new();
 
-    //let mut working_set = Vec::new();
-    //for i in 0..mlwe_params.poly_len{
-	//working_set.push(PolyMatrixNTT::zero(&mlwe_params, 1, 1));
-    //}
-
-    let ell = mlwe_params.poly_len_log2;
-
-    let mut index = 0;
-
-    for cur_ell in 1..=ell{ // 1, 2, 3, 4, 5, 6, 7
-	let num_in = 1 << (ell - cur_ell + 1); // 128 64 32, 16, 8 4 2 
-	let num_out = num_in >> 1; // 64 32 16 8 4 2 1
-
-	let (first_half, second_half) = (&mut working_set[..num_in]).split_at_mut(num_out);
-
-	let neg = &expansion_table_neg[cur_ell - 1]; // 128, 64, 32, 16, 8, 4, 2, 1
-	let pos = &expansion_table_pos[cur_ell - 1];	
-
-	for i in 0..num_out {
-	    let ct_even = &mut first_half[i];
-	    let ct_odd = &second_half[i];
-
-	    scalar_multiply_avx(&mut pos_times_ct_odd, &pos, &ct_odd);
-	    scalar_multiply_avx(&mut neg_times_ct_odd, &neg, &ct_odd);
-
-	    ct_sum_1.as_mut_slice().copy_from_slice(ct_even.as_slice());
-
-	    add_into(&mut ct_sum_1, &neg_times_ct_odd); //even - odd * 1024
-	    add_into(ct_even, &pos_times_ct_odd); // even + odd * 1024
- 	    
-	    let mut ct_result_b = mlwe_automorph_b(&mlwe_params, (1<<cur_ell)+1, dimension, t_exp, &ct_sum_1, &decomp_a_vec[index], &pub_param[mlwe_params.poly_len_log2 - cur_ell], &auto_table);
-
-	    //let mut ct_result_b = mlwe_automorph_b_for_packing(&mlwe_params, (1<<cur_ell)+1, t_exp, &decomp_a_vec[index], &pub_param[mlwe_params.poly_len_log2 - cur_ell]);//2^1+1, 2^2+1, ..., 2^7+1 // 6 5 4 3 2 1 0
-	    index = index + 1;
-
-	    add_into(ct_even, &ct_result_b);
-	}
-    }
-    let mut res = working_set[0].clone();
-    
-    res
-}
 
 pub fn prep_pack_lwes_to_mlwe_db<'a>(
     params: &'a Params, 
