@@ -2094,6 +2094,48 @@ mod test {
 	let mut client = Client::init(&params);
 	client.generate_secret_keys();
 
+///////////////////////for keyswitching/////////////////////////
+
+	let tmp_scale = 1<<(params.poly_len_log2 -mlwe_params.poly_len_log2-1);
+	let t_exp = params.t_exp_left;
+	let auto_table = generate_automorph_tables_brute_force(&mlwe_params); //automorphism table for mlwe
+	let pack_seed = [1u8; 32];
+
+	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut client); // key switching keys for lwe to mlwe
+
+	let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params); // expansion table for lwe to mlwe
+	let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
+
+	let y_constants = generate_y_constants(&params);
+	
+	let pack_pub_params = raw_generate_expansion_params( // mlwe to rlwe compression key
+            &params,
+            client.get_sk_reg(),
+            mlwe_params.poly_len_log2,
+            params.t_exp_left,
+
+            &mut ChaCha20Rng::from_entropy(),
+
+            &mut ChaCha20Rng::from_seed(pack_seed),
+        );
+
+	let mut fake_pack_pub_params = pack_pub_params.clone();
+        // zero out all of the second rows
+        for i in 0..pack_pub_params.len() {
+            for col in 0..pack_pub_params[i].cols {
+                fake_pack_pub_params[i].get_poly_mut(1, col).fill(0);
+            }
+        }
+
+        let mut pack_pub_params_row_1s = pack_pub_params.clone();
+        for i in 0..pack_pub_params.len() {
+            pack_pub_params_row_1s[i] =
+                pack_pub_params[i].submatrix(1, 0, 1, pack_pub_params[i].cols);
+            pack_pub_params_row_1s[i] = condense_matrix(&params, &pack_pub_params_row_1s[i]);
+        }
+
+/////////////////////////////////////////////////////////////////////////////////////////
+
 	let db_rows: usize = 1<<(params.db_dim_1 + params.poly_len_log2); // db_row : first query length
 	let db_cols: usize = 1<<(params.db_dim_2 + params.poly_len_log2); // db_col : second query length
 	println!("rows: {}, cols: {}", db_rows, db_cols);
@@ -2130,43 +2172,6 @@ mod test {
 	let mut g_inv_b_56 = PolyMatrixRaw::zero(&mlwe_params, 2, db_cols / mlwe_params.poly_len);
 
 	println!("making keyswitching keys");
-
-	////////////////////////////for keyswitching///////////////////
-	let tmp_scale = 1<<(params.poly_len_log2 -mlwe_params.poly_len_log2-1);
-	let t_exp = params.t_exp_left;
-	let auto_table = generate_automorph_tables_brute_force(&mlwe_params); //automorphism table for mlwe
-	let pack_seed = [1u8; 32];
-
-	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut y_client.inner); // key switching keys for lwe to mlwe
-
-	let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params); // expansion table for lwe to mlwe
-	let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
-
-	let y_constants = generate_y_constants(&params);
-	
-	let pack_pub_params = raw_generate_expansion_params( // mlwe to rlwe compression key
-            &params,
-            y_client.inner.get_sk_reg(),
-            mlwe_params.poly_len_log2,
-            params.t_exp_left,
-            &mut ChaCha20Rng::from_entropy(),
-            &mut ChaCha20Rng::from_seed(pack_seed),
-        );
-
-	let mut fake_pack_pub_params = pack_pub_params.clone();
-        // zero out all of the second rows
-        for i in 0..pack_pub_params.len() {
-            for col in 0..pack_pub_params[i].cols {
-                fake_pack_pub_params[i].get_poly_mut(1, col).fill(0);
-            }
-        }
-
-        let mut pack_pub_params_row_1s = pack_pub_params.clone();
-        for i in 0..pack_pub_params.len() {
-            pack_pub_params_row_1s[i] =
-                pack_pub_params[i].submatrix(1, 0, 1, pack_pub_params[i].cols);
-            pack_pub_params_row_1s[i] = condense_matrix(&params, &pack_pub_params_row_1s[i]);
-        }
 
 
 	///////////////////////////////////////////////////////////////
