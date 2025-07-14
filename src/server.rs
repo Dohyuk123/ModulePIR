@@ -1024,6 +1024,91 @@ where
         }
     }
 
+    pub fn perform_offline_precomputation_mlwe (
+	&self, 
+	mlwe_params: &'a Params,
+	simple_params: &'a Params,
+	dimension: usize, 
+	t_exp: usize,
+	db_cols: usize, 
+	expansion_key_a: &[PolyMatrixNTT<'a>],
+	fake_pack_pub_params: &[PolyMatrixNTT<'a>], 
+	y_constants: &(Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>),
+	g_inv_a: &mut PolyMatrixRaw<'a>,
+	g_inv_a_56: &mut PolyMatrixRaw<'a>, 
+	auto_table: &[Vec<usize>],
+	expansion_table_neg: &[PolyMatrixNTT<'a>], 
+	expansion_table_pos: &[PolyMatrixNTT<'a>],
+    )->(Vec<(PolyMatrixNTT<'a>, Vec<PolyMatrixNTT<'a>>, Vec<Vec<usize>>)>, Vec<Vec<PolyMatrixNTT<'a>>>, Vec<PolyMatrixNTT<'a>>,  PolyMatrixNTT<'a>){
+
+	let mut client = Client::init(&self.params);
+	let y_client = YClient::new(&mut client, &self.params);
+
+	let rlwe_q_prime_2 = self.params.get_q_prime_2();
+	let hint = self.answer_hint_ring(SEED_1, db_cols);
+
+	let (response_a, decomp_a) = prep_pack_lwes_to_mlwe_db(&self.params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a, &auto_table, &expansion_table_neg, &expansion_table_pos);
+
+	let response_a_simple_raw = response_a.raw();
+	let mut response_a_simple_raw_transposed = PolyMatrixRaw::zero(&mlwe_params, response_a_simple_raw.get_cols(), response_a_simple_raw.get_rows());
+
+	let transposed_array = transpose_poly(&mlwe_params, &response_a_simple_raw);
+	response_a_simple_raw_transposed.as_mut_slice().copy_from_slice(transposed_array.as_slice());
+
+	let mut response_a_simple_raw_rescaled = PolyMatrixRaw::zero(&simple_params, response_a_simple_raw.get_cols(), response_a_simple_raw.get_rows());
+	
+	for i in 0..response_a_simple_raw_transposed.as_slice().len() {
+	    response_a_simple_raw_rescaled.data[i] = rescale(response_a_simple_raw_transposed.data[i], self.params.modulus, rlwe_q_prime_2);
+	}
+
+	gadget_invert_rdim(g_inv_a, &response_a_simple_raw_rescaled, dimension);
+
+	g_inv_a_56.as_mut_slice().copy_from_slice(&g_inv_a.as_slice());
+
+	let g_inv_a_ntt = g_inv_a_56.ntt(); // hint 0
+
+	let mut hint_0s = Vec::new();
+	for i in 0..2{
+	    hint_0s.push(g_inv_a_ntt.submatrix(i*dimension, 0, dimension, db_cols / mlwe_params.poly_len)); //hint0 decomposed
+	}
+
+	let double_query_a = self.generate_double_hint_mlwe(&mlwe_params, SEED_0, dimension, self.params.db_dim_2, mlwe_params.poly_len_log2, 2); // double query a
+
+	let mut hint_final_0 = Vec::new(); // hint only made of a parts
+	for i in 0..2{
+	    let hint_final_element = &hint_0s[i] * &double_query_a;
+	    hint_final_0.push(hint_final_element);
+	}
+
+	////////////////packing mlwes to rlwe A//////////////////////////
+
+	let mut packed_a_vec = Vec::new();
+	for i in 0..2{
+	    let mut packed_a = Vec::new();
+	    for j in 0..dimension{
+		let mut input_poly = PolyMatrixRaw::zero(&self.params, 2, 1);
+		let mut input_poly_tmp = PolyMatrixRaw::zero(&self.params, 1, 1);
+
+		mlwe_to_rlwe_a(&self.params, &mut input_poly_tmp, hint_final_0[i].submatrix(j, 0, 1, dimension).raw().as_slice().to_vec(), mlwe_params.poly_len_log2);
+		input_poly.as_mut_slice()[0..self.params.poly_len].copy_from_slice(&input_poly_tmp.as_slice());
+		packed_a.push(input_poly.ntt());
+	    }
+
+	    let (precomp_res, precomp_vals, precomp_tables) = precompute_pack_mlwe_to_rlwe(
+	        &self.params,
+	        self.params.poly_len_log2,
+	        mlwe_params.poly_len_log2,
+	        &packed_a,
+	        &fake_pack_pub_params,
+	        &y_constants,
+	    );
+	 
+	    packed_a_vec.push((precomp_res, precomp_vals, precomp_tables))
+	}
+
+	(packed_a_vec, decomp_a, hint_0s, double_query_a)
+    }
+
     pub fn perform_offline_precomputation(
         &self,
         measurement: Option<&mut Measurement>,
@@ -1261,88 +1346,218 @@ where
 
     pub fn perform_online_computation_mlwe (
 	&self, 
-	mlwe_params: &'a Params,
+	mlwe_params: &'a Params, 
 	simple_params: &'a Params,
-	dimension: usize, 
+	dimension : usize, 
 	t_exp: usize,
-	db_cols: usize, 
-	expansion_key_a: &[PolyMatrixNTT],
-	fake_pack_pub_params: &[PolyMatrixNTT<'a>], 
+	db_cols: usize,  
+	expansion_key_b: &[PolyMatrixNTT], 
 	y_constants: &(Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>),
-	g_inv_a: &mut PolyMatrixRaw<'a>,
-	g_inv_a_56: &mut PolyMatrixRaw<'a>, 
-	auto_table: &[Vec<usize>],
+	fake_pack_pub_params: &[PolyMatrixNTT<'a>], 
+	pack_pub_params_row_1s: &[PolyMatrixNTT], 
+	auto_table: &[Vec<usize>], 
 	expansion_table_neg: &[PolyMatrixNTT<'a>], 
-	expansion_table_pos: &[PolyMatrixNTT<'a>],
-    )->Vec<(PolyMatrixNTT<'a>, Vec<PolyMatrixNTT<'a>>, Vec<Vec<usize>>)> {
-
-	let mut client = Client::init(&self.params);
-	let y_client = YClient::new(&mut client, &self.params);
-
-	let rlwe_q_prime_2 = self.params.get_q_prime_2();
-	let hint = self.answer_hint_ring(SEED_1, db_cols);
-
-	let (response_a, decomp_a) = prep_pack_lwes_to_mlwe_db(&self.params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a, &auto_table, &expansion_table_neg, &expansion_table_pos);
-
-	let response_a_simple_raw = response_a.raw();
-	let mut response_a_simple_raw_transposed = PolyMatrixRaw::zero(&mlwe_params, response_a_simple_raw.get_cols(), response_a_simple_raw.get_rows());
-
-	let transposed_array = transpose_poly(&mlwe_params, &response_a_simple_raw);
-	response_a_simple_raw_transposed.as_mut_slice().copy_from_slice(transposed_array.as_slice());
-
-	let mut response_a_simple_raw_rescaled = PolyMatrixRaw::zero(&simple_params, response_a_simple_raw.get_cols(), response_a_simple_raw.get_rows());
+	expansion_table_pos: &[PolyMatrixNTT<'a>], 
+	decomp_a: Vec<Vec<PolyMatrixNTT<'a>>>, 
+	hint_0s: &[PolyMatrixNTT<'a>], 
+	double_query_a: &PolyMatrixNTT<'a>, 
+	packed_a_vec: &[(PolyMatrixNTT<'a>, Vec<PolyMatrixNTT<'a>>, Vec<Vec<usize>>)], 
+	g_inv_b: &mut PolyMatrixRaw<'a>,
+	g_inv_b_56: &mut PolyMatrixRaw<'a>, 
+	double_query_b: &PolyMatrixNTT<'a>, 
+	packed_query_col: &AlignedMemory64, 
 	
-	for i in 0..response_a_simple_raw_transposed.as_slice().len() {
-	    response_a_simple_raw_rescaled.data[i] = rescale(response_a_simple_raw_transposed.data[i], self.params.modulus, rlwe_q_prime_2);
+    ) ->(Vec<Vec<u8>>, Vec<u8>) {
+	////////////////////////////////things to create before response////////////////////////////////
+
+	let tmp_scale = 1<<(self.params.poly_len_log2 - mlwe_params.poly_len_log2 - 1);
+	let rlwe_q_prime_1 = self.params.get_q_prime_1();
+	let rlwe_q_prime_2 = self.params.get_q_prime_2();
+
+	let mut response_b_simple_transposed = PolyMatrixRaw::zero(&mlwe_params, 1, db_cols / mlwe_params.poly_len);
+	let mut response_b_simple_rescaled = PolyMatrixRaw::zero(&simple_params, 1, db_cols / mlwe_params.poly_len);
+
+	let mut response_0s = Vec::new(); // decomped response lwe
+	let mut response_0_times_hint_double_vec = Vec::new(); // b1 times A2
+	let mut response_mult_vec = Vec::new(); // response times response // b1 time b2
+	let mut hint_0_times_response_1_vec = Vec::new(); // hint only made of a parts // A1 time b2
+	let mut packed_b = Vec::new();
+	let mut last_pack_a_vec = Vec::new(); // final pack input a 
+	let mut last_b_values = Vec::new();
+	let mut tmp_last_rlwe_poly = PolyMatrixRaw::zero(&self.params, 1, 1);
+
+///////////////////////////////response starts/////////////////////////////
+
+	println!("online computation");
+
+	let start = Instant::now();
+
+	//simple response
+	let response: AlignedMemory64 = self.answer_query(packed_query_col.as_slice()); 
+
+	//let start_0 = Instant::now();
+
+	//pack simple response into mlwe
+	let response_b_simple = pack_lwes_to_mlwe_db(&self.params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
+
+	//let st = Instant::now();
+
+	let transposed_array_b = transpose_poly(&mlwe_params, &response_b_simple);
+	response_b_simple_transposed.as_mut_slice().copy_from_slice(transposed_array_b.as_slice());
+
+	let res_start = Instant::now();
+	for i in 0..response_b_simple_rescaled.as_slice().len() {
+	    response_b_simple_rescaled.data[i] = rescale(response_b_simple_transposed.data[i], self.params.modulus, rlwe_q_prime_1);
+	}
+	//let res_end = Instant::now();
+
+	gadget_invert_rdim(g_inv_b, &response_b_simple_rescaled, 1); // db * b1 ->gadget : g_invb
+
+	g_inv_b_56.as_mut_slice().copy_from_slice(&g_inv_b.as_slice());
+
+	let g_inv_b_ntt = g_inv_b_56.ntt(); // response 0
+
+	//let mut response_0s = Vec::new();
+	
+	for i in 0..2{
+	    response_0s.push(g_inv_b_ntt.submatrix(i, 0, 1, db_cols / mlwe_params.poly_len));  // db * b1 gadget
+	}
+	
+	let start_1 = Instant::now();
+
+	//let mut response_0_times_hint_double_vec = Vec::new(); // b1 times A2
+	for i in 0..2{
+	    let response_0_times_hint_double = &response_0s[i] * &double_query_a; // db* b1 gadget / times / A2
+	    response_0_times_hint_double_vec.push(response_0_times_hint_double);
 	}
 
-	gadget_invert_rdim(g_inv_a, &response_a_simple_raw_rescaled, dimension);
-
-	g_inv_a_56.as_mut_slice().copy_from_slice(&g_inv_a.as_slice());
-
-	let g_inv_a_ntt = g_inv_a_56.ntt(); // hint 0
-
-	let mut hint_0s = Vec::new();
+	//let mut response_mult_vec = Vec::new(); // response times response // b1 time b2
 	for i in 0..2{
-	    hint_0s.push(g_inv_a_ntt.submatrix(i*dimension, 0, dimension, db_cols / mlwe_params.poly_len)); //hint0 decomposed
+	    let response_mult = &response_0s[i] * &double_query_b; // db* b1 gadget / times / b2
+	    response_mult_vec.push(response_mult);
 	}
 
-	let double_query_a = self.generate_double_hint_mlwe(&mlwe_params, SEED_0, dimension, self.params.db_dim_2, mlwe_params.poly_len_log2, 2); // double query a
-
-	let mut hint_final_0 = Vec::new(); // hint only made of a parts
+	//let mut hint_0_times_response_1_vec = Vec::new(); // hint only made of a parts // A1 time b2
 	for i in 0..2{
-	    let hint_final_element = &hint_0s[i] * &double_query_a;
-	    hint_final_0.push(hint_final_element);
+	    let hint_0_times_response_1 = &hint_0s[i] * double_query_b;// db*A1 gadget / times / b2
+	    hint_0_times_response_1_vec.push(hint_0_times_response_1);
 	}
 
-	////////////////packing mlwes to rlwe A//////////////////////////
+	////////////////////mlwe to rlwe packing//////////////////////////
 
-	let mut packed_a_vec = Vec::new();
-	for i in 0..2{
-	    let mut packed_a = Vec::new();
-	    for j in 0..dimension{
-		let mut input_poly = PolyMatrixRaw::zero(&self.params, 2, 1);
-		let mut input_poly_tmp = PolyMatrixRaw::zero(&self.params, 1, 1);
-
-		mlwe_to_rlwe_a(&self.params, &mut input_poly_tmp, hint_final_0[i].submatrix(j, 0, 1, dimension).raw().as_slice().to_vec(), mlwe_params.poly_len_log2);
-		input_poly.as_mut_slice()[0..self.params.poly_len].copy_from_slice(&input_poly_tmp.as_slice());
-		packed_a.push(input_poly.ntt());
+	for num in 0..2{
+	    let mut b_values = Vec::new();
+	    let mut tmp_rlwe_poly = PolyMatrixRaw::zero(&self.params, 1, 1);
+	    for i in 0..dimension {
+	        let mlwe_tmp = hint_0_times_response_1_vec[num].submatrix(i, 0, 1, 1);
+		let mlwe_tmp_raw = mlwe_tmp.raw();
+		
+		for j in 0..mlwe_params.poly_len{
+		    tmp_rlwe_poly.as_mut_slice()[j*dimension + i] = mlwe_tmp_raw.as_slice()[j];
+	        }
+	    }
+	    for i in 0..self.params.poly_len {
+		b_values.push(tmp_rlwe_poly.as_slice()[i]);
 	    }
 
-	    let (precomp_res, precomp_vals, precomp_tables) = precompute_pack_mlwe_to_rlwe(
+	    let (tmp_precomp_res, tmp_precomp_vals, tmp_precomp_tables) = &packed_a_vec[num];
+
+	    let packed = pack_using_precomp_vals_mlwe_to_rlwe(
 	        &self.params,
 	        self.params.poly_len_log2,
 	        mlwe_params.poly_len_log2,
-	        &packed_a,
-	        &fake_pack_pub_params,
+	        &pack_pub_params_row_1s,
+	        &b_values,
+	        tmp_precomp_res,
+	        &tmp_precomp_vals,
+	        &tmp_precomp_tables,
 	        &y_constants,
 	    );
-	 
-	    packed_a_vec.push((precomp_res, precomp_vals, precomp_tables))
+	    
+	    packed_b.push(packed);
 	}
 
-	packed_a_vec
+///////////////////////////////////////////////////
+
+	//let mut last_pack_a_vec = Vec::new(); // final pack input a 
+	for i in 0..2{
+	    let mut input_poly = PolyMatrixRaw::zero(&self.params, 2, 1);
+	    let mut input_poly_tmp = PolyMatrixRaw::zero(&self.params, 1, 1);
+	    
+	    mlwe_to_rlwe_a(&self.params, &mut input_poly_tmp, response_0_times_hint_double_vec[i].raw().as_slice().to_vec(), mlwe_params.poly_len_log2);
+	    for z in 0..self.params.poly_len {
+        	let val = barrett_reduction_u128(&self.params, input_poly_tmp.as_slice()[z] as u128 * tmp_scale as u128);
+        	input_poly.data[z] += val;
+        	if input_poly.data[z] >= self.params.modulus {
+           	    input_poly.data[z] -= self.params.modulus;
+        	}
+    	    }
+	    //input_poly.as_mut_slice()[0..params.poly_len].copy_from_slice(&input_poly_tmp.as_slice());
+
+	    last_pack_a_vec.push(input_poly.ntt());
+	}
+
+
+        let (last_precomp_res, last_precomp_vals, last_precomp_tables) = precompute_pack_mlwe_to_rlwe(
+	    &self.params,
+	    self.params.poly_len_log2,
+	    self.params.poly_len_log2 - 1,
+	    &last_pack_a_vec,
+	    &fake_pack_pub_params,
+	    &y_constants,
+	);
+
+///////////////////////////////////////////////////////////////////
+
+	for num in 0..2{
+	    let mut last_mlwe_tmp = response_mult_vec[num].submatrix(0, 0, 1, 1);
+	    let last_mlwe_tmp_raw = last_mlwe_tmp.raw();
+	    for j in 0..mlwe_params.poly_len{
+		let val = barrett_reduction_u128(&self.params, last_mlwe_tmp_raw.as_slice()[j] as u128 * tmp_scale as u128);
+		let idx = j*dimension + num;
+		tmp_last_rlwe_poly.data[idx] += val;
+		if tmp_last_rlwe_poly.data[idx] >= self.params.modulus {
+		    tmp_last_rlwe_poly.data[idx] -= self.params.modulus;
+		}
+	    }
+	}
+
+	for i in 0..self.params.poly_len{
+	    last_b_values.push(tmp_last_rlwe_poly.as_slice()[i]);
+	}
+
+	let last_packed = pack_using_precomp_vals_mlwe_to_rlwe(
+	    &self.params,
+	    self.params.poly_len_log2,
+	    self.params.poly_len_log2 - 1,
+	    &pack_pub_params_row_1s,
+	    &last_b_values,
+	    &last_precomp_res,
+	    &last_precomp_vals,
+	    &last_precomp_tables,
+	    &y_constants,
+	);
+
+	let end = Instant::now();
+
+	//modulus switch
+
+	let mut packed_mod_switched_a = Vec::with_capacity(packed_b.len());
+	for ct in packed_b.iter() {
+	    let res = ct.raw();
+	    let res_switched = res.switch(rlwe_q_prime_1, rlwe_q_prime_2);
+	    packed_mod_switched_a.push(res_switched);
+	}
+	
+	let res_b = last_packed.raw();
+	let res_switched_b = res_b.switch(rlwe_q_prime_1, rlwe_q_prime_2);
+	
+	//let end = Instant::now();
+
+	(packed_mod_switched_a, res_switched_b)
+
     }
+
 
     pub fn perform_online_computation<const K: usize>(
         &self,
@@ -2167,11 +2382,11 @@ mod test {
 	let rlwe_q_prime_2 = params.get_q_prime_2();
 
 	//256MB: 3, 2 //1GB: 4, 3 //8GB: 5, 5
-	params.db_dim_1 = 2;
-	params.db_dim_2 = 1;
+	params.db_dim_1 = 4;
+	params.db_dim_2 = 3;
 
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len_log2 = 9;
+	mlwe_params.poly_len_log2 = 7;
 	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
 	
 	let mut simple_params = mlwe_params.clone();
@@ -2269,6 +2484,205 @@ mod test {
 
 	println!("offline preprocessing");
 
+	let (packed_a_vec, decomp_a, hint_0s, double_query_a) = server.perform_offline_precomputation_mlwe (
+	    &mlwe_params, 
+	    &simple_params, 
+	    dimension,
+	    t_exp, 
+	    db_cols, 
+	    &expansion_key_a,
+	    &fake_pack_pub_params, 
+	    &y_constants, 
+	    &mut g_inv_a, 
+	    &mut g_inv_a_56, 
+	    &auto_table, 
+	    &expansion_table_neg, 
+	    &expansion_table_pos, 
+	);
+
+
+	/////////////////////////preprocessing finished////////////////////////////
+	
+
+	///////////////////////////////////////////////////////////////
+	//////////////////////query////////////////////////////////////
+
+////////////////////////////////client creates query////////////////////////////
+
+	let mut y_client = YClient::new(&mut client, &params);
+
+	println!("making query");
+	let val_row: u32 = rng.gen_range(0..(db_rows as u32));
+	let val_col: u16 = rng.gen_range(0..((db_cols / mlwe_params.poly_len) as u16));
+	let target_row = val_row as usize;
+	let target_col = val_col as usize;	
+
+	// simple query
+	let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, target_row); // query b -> b part
+	let query_col_last_row = &query_col[params.poly_len * db_rows..];
+	let packed_query_col = pack_query(&params, query_col_last_row); // query b // row: 16384
+
+	//double query
+	let double_query_b = y_client.generate_query_double_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2,  mlwe_params.poly_len_log2, target_col); // col: 8192
+
+////////////////////////////////online computation////////////////////////////////
+
+	let start = Instant::now();
+
+	let (packed_mod_switched_a, res_switched_b) = server.perform_online_computation_mlwe (
+	    &mlwe_params, 
+	    &simple_params, 
+	    dimension, 
+	    t_exp, 
+	    db_cols, 
+	    &expansion_key_b, 
+	    &y_constants, 
+	    &fake_pack_pub_params, 
+	    &pack_pub_params_row_1s, 
+	    &auto_table, 
+	    &expansion_table_neg, 
+	    &expansion_table_pos, 
+	    decomp_a, 
+	    &hint_0s, 
+	    &double_query_a,
+	    &packed_a_vec, 
+	    &mut g_inv_b, 
+	    &mut g_inv_b_56, 
+	    &double_query_b, 
+	    &packed_query_col 
+	);
+
+	let end = Instant::now();
+
+	//////////////////final debug//////////////////
+
+	println!("decrypting");
+
+	let dec_res = y_client.decode_response_mlwe(&mlwe_params, &packed_mod_switched_a, &res_switched_b, &g_exp_56_ntt, rlwe_q_prime_1, rlwe_q_prime_2);
+
+	for i in 0..mlwe_params.poly_len{
+	    assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, dec_res[0].data[i]);
+	}
+	
+	println!("total time: {:?}", end - start);
+
+    }
+
+    #[test]
+    fn test_whole_protocol_no_fn(){ // start : row: 16384 / second : col:8192
+
+	println!("creating server");
+
+	////////first settings
+	let mut params = params_for_scenario(1<<30, 1);
+	params.pt_modulus = 1<<16;
+	
+	let rlwe_q_prime_1 = params.get_q_prime_1();
+	let rlwe_q_prime_2 = params.get_q_prime_2();
+
+	//256MB: 3, 2 //1GB: 4, 3 //8GB: 5, 5
+	params.db_dim_1 = 2;
+	params.db_dim_2 = 1;
+
+	let mut mlwe_params = params.clone();
+	mlwe_params.poly_len_log2 = 9;
+	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
+	
+	let mut simple_params = mlwe_params.clone();
+	simple_params.modulus = 1<<30;
+	simple_params.modulus_log2 = 30;
+	
+	let dimension = params.poly_len / mlwe_params.poly_len;
+
+	let mut client = Client::init(&params);
+	client.generate_secret_keys();
+
+///////////////////////for keyswitching/////////////////////////
+
+	let tmp_scale = 1<<(params.poly_len_log2 -mlwe_params.poly_len_log2-1);
+	let t_exp = params.t_exp_left;
+	let auto_table = generate_automorph_tables_brute_force(&mlwe_params); //automorphism table for mlwe
+	let pack_seed = [1u8; 32];
+
+	let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut client); // key switching keys for lwe to mlwe
+
+	let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params); // expansion table for lwe to mlwe
+	let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
+
+	let y_constants = generate_y_constants(&params);
+	
+	let pack_pub_params = raw_generate_expansion_params( // mlwe to rlwe compression key
+            &params,
+            client.get_sk_reg(),
+            mlwe_params.poly_len_log2,
+            params.t_exp_left,
+
+            &mut ChaCha20Rng::from_entropy(),
+
+            &mut ChaCha20Rng::from_seed(pack_seed),
+        );
+
+	let mut fake_pack_pub_params = pack_pub_params.clone();
+        // zero out all of the second rows
+        for i in 0..pack_pub_params.len() {
+            for col in 0..pack_pub_params[i].cols {
+                fake_pack_pub_params[i].get_poly_mut(1, col).fill(0);
+            }
+        }
+
+        let mut pack_pub_params_row_1s = pack_pub_params.clone();
+        for i in 0..pack_pub_params.len() {
+            pack_pub_params_row_1s[i] =
+                pack_pub_params[i].submatrix(1, 0, 1, pack_pub_params[i].cols);
+            pack_pub_params_row_1s[i] = condense_matrix(&params, &pack_pub_params_row_1s[i]);
+        }
+
+/////////////////////////////////////////////////////////////////////////////////////////
+
+	let db_rows: usize = 1<<(params.db_dim_1 + params.poly_len_log2); // db_row : first query length
+	let db_cols: usize = 1<<(params.db_dim_2 + params.poly_len_log2); // db_col : second query length
+	println!("rows: {}, cols: {}", db_rows, db_cols);
+	let mut rng = rand::thread_rng();
+	
+	let mut matrix = Vec::with_capacity(db_rows * db_cols); // database matrix
+
+	for i in 0..db_rows{
+	    for j in 0..db_cols{
+		let value: u16 = rng.gen(); // 0 ~ 65535 중 임의의 값
+        	matrix.push(value);
+	    }
+	}	
+
+	let server: YServer<u16> = YServer::<u16>::new( // database
+	    &params,
+	    matrix.into_iter(),
+	    false,
+	    true,
+	    false
+	);
+
+	let mut y_client = YClient::new(&mut client, &params);
+
+	let g_exp = build_gadget(&simple_params, 1, 2); // for gadget decomposition
+	
+	let mut g_exp_56 = PolyMatrixRaw::zero(&mlwe_params, 1, 2);
+	g_exp_56.as_mut_slice().copy_from_slice(&g_exp.as_slice());
+	let g_exp_56_ntt = g_exp_56.ntt();
+
+	let mut g_inv_a = PolyMatrixRaw::zero(&simple_params, dimension * 2, db_cols / mlwe_params.poly_len);
+	let mut g_inv_a_56 = PolyMatrixRaw::zero(&mlwe_params, dimension * 2, db_cols / mlwe_params.poly_len);
+	let mut g_inv_b = PolyMatrixRaw::zero(&simple_params, 2, db_cols / mlwe_params.poly_len);
+	let mut g_inv_b_56 = PolyMatrixRaw::zero(&mlwe_params, 2, db_cols / mlwe_params.poly_len);
+
+	println!("making keyswitching keys");
+
+
+	///////////////////////////////////////////////////////////////
+	///////////////////////hint preprocessing//////////////////////
+	///////////////////////////////////////////////////////////////
+
+	println!("offline preprocessing");
+
 
 	let hint = server.answer_hint_ring(SEED_1, db_cols);
 
@@ -2338,8 +2752,6 @@ mod test {
 	//////////////////////query////////////////////////////////////
 
 ////////////////////////////////client creates query////////////////////////////
-
-	let mut y_client = YClient::new(&mut client, &params);
 
 	println!("making query");
 	let val_row: u32 = rng.gen_range(0..(db_rows as u32));
