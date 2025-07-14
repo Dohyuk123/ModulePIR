@@ -8,7 +8,7 @@ use rand_chacha::ChaCha20Rng;
 //use rayon::prelude::*;
 
 use spiral_rs::aligned_memory::AlignedMemory64;
-use spiral_rs::{arith::*, client::*, params::*, poly::*};
+use spiral_rs::{arith::*, client::*, params::*, poly::*, gadget::*};
 
 use crate::convolution::naive_multiply_matrices;
 use crate::measurement::Measurement;
@@ -821,8 +821,12 @@ where
 	dim_log1: usize,
 	pt_byte_log2: usize,
 	index: usize,
-	client: &'a Client,
+	//client: &'a Client,
     ) -> PolyMatrixNTT<'a> {
+	let mut client = Client::init(&self.params);
+	client.generate_secret_keys();
+	
+	
 	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx)); // very important!!
 
 	let mut rlwe_ct_vec = Vec::new();
@@ -1253,6 +1257,91 @@ where
         }
 
         packed_mod_switched
+    }
+
+    pub fn perform_online_computation_mlwe (
+	&self, 
+	mlwe_params: &'a Params,
+	simple_params: &'a Params,
+	dimension: usize, 
+	t_exp: usize,
+	db_cols: usize, 
+	expansion_key_a: &[PolyMatrixNTT],
+	fake_pack_pub_params: &[PolyMatrixNTT<'a>], 
+	y_constants: &(Vec<PolyMatrixNTT<'a>>, Vec<PolyMatrixNTT<'a>>),
+	g_inv_a: &mut PolyMatrixRaw<'a>,
+	g_inv_a_56: &mut PolyMatrixRaw<'a>, 
+	auto_table: &[Vec<usize>],
+	expansion_table_neg: &[PolyMatrixNTT<'a>], 
+	expansion_table_pos: &[PolyMatrixNTT<'a>],
+    )->Vec<(PolyMatrixNTT<'a>, Vec<PolyMatrixNTT<'a>>, Vec<Vec<usize>>)> {
+
+	let mut client = Client::init(&self.params);
+	let y_client = YClient::new(&mut client, &self.params);
+
+	let rlwe_q_prime_2 = self.params.get_q_prime_2();
+	let hint = self.answer_hint_ring(SEED_1, db_cols);
+
+	let (response_a, decomp_a) = prep_pack_lwes_to_mlwe_db(&self.params, &mlwe_params, &hint, dimension, t_exp, &expansion_key_a, &auto_table, &expansion_table_neg, &expansion_table_pos);
+
+	let response_a_simple_raw = response_a.raw();
+	let mut response_a_simple_raw_transposed = PolyMatrixRaw::zero(&mlwe_params, response_a_simple_raw.get_cols(), response_a_simple_raw.get_rows());
+
+	let transposed_array = transpose_poly(&mlwe_params, &response_a_simple_raw);
+	response_a_simple_raw_transposed.as_mut_slice().copy_from_slice(transposed_array.as_slice());
+
+	let mut response_a_simple_raw_rescaled = PolyMatrixRaw::zero(&simple_params, response_a_simple_raw.get_cols(), response_a_simple_raw.get_rows());
+	
+	for i in 0..response_a_simple_raw_transposed.as_slice().len() {
+	    response_a_simple_raw_rescaled.data[i] = rescale(response_a_simple_raw_transposed.data[i], self.params.modulus, rlwe_q_prime_2);
+	}
+
+	gadget_invert_rdim(g_inv_a, &response_a_simple_raw_rescaled, dimension);
+
+	g_inv_a_56.as_mut_slice().copy_from_slice(&g_inv_a.as_slice());
+
+	let g_inv_a_ntt = g_inv_a_56.ntt(); // hint 0
+
+	let mut hint_0s = Vec::new();
+	for i in 0..2{
+	    hint_0s.push(g_inv_a_ntt.submatrix(i*dimension, 0, dimension, db_cols / mlwe_params.poly_len)); //hint0 decomposed
+	}
+
+	let double_query_a = self.generate_double_hint_mlwe(&mlwe_params, SEED_0, dimension, self.params.db_dim_2, mlwe_params.poly_len_log2, 2); // double query a
+
+	let mut hint_final_0 = Vec::new(); // hint only made of a parts
+	for i in 0..2{
+	    let hint_final_element = &hint_0s[i] * &double_query_a;
+	    hint_final_0.push(hint_final_element);
+	}
+
+	////////////////packing mlwes to rlwe A//////////////////////////
+
+	let mut packed_a_vec = Vec::new();
+	for i in 0..2{
+	    let mut packed_a = Vec::new();
+	    for j in 0..dimension{
+		let mut input_poly = PolyMatrixRaw::zero(&self.params, 2, 1);
+		let mut input_poly_tmp = PolyMatrixRaw::zero(&self.params, 1, 1);
+
+		mlwe_to_rlwe_a(&self.params, &mut input_poly_tmp, hint_final_0[i].submatrix(j, 0, 1, dimension).raw().as_slice().to_vec(), mlwe_params.poly_len_log2);
+		input_poly.as_mut_slice()[0..self.params.poly_len].copy_from_slice(&input_poly_tmp.as_slice());
+		packed_a.push(input_poly.ntt());
+	    }
+
+	    let (precomp_res, precomp_vals, precomp_tables) = precompute_pack_mlwe_to_rlwe(
+	        &self.params,
+	        self.params.poly_len_log2,
+	        mlwe_params.poly_len_log2,
+	        &packed_a,
+	        &fake_pack_pub_params,
+	        &y_constants,
+	    );
+	 
+	    packed_a_vec.push((precomp_res, precomp_vals, precomp_tables))
+	}
+
+	packed_a_vec
     }
 
     pub fn perform_online_computation<const K: usize>(
@@ -2158,7 +2247,7 @@ mod test {
 	    false
 	);
 
-	let mut y_client = YClient::new(&mut client, &params);
+	//let mut y_client = YClient::new(&mut client, &params);
 
 	let g_exp = build_gadget(&simple_params, 1, 2); // for gadget decomposition
 	
@@ -2208,7 +2297,7 @@ mod test {
 	    hint_0s.push(g_inv_a_ntt.submatrix(i*dimension, 0, dimension, db_cols / mlwe_params.poly_len)); //hint0 decomposed
 	}
 
-	let double_query_a = server.generate_double_hint_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2, mlwe_params.poly_len_log2, 2, &y_client.inner); // double query a
+	let double_query_a = server.generate_double_hint_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2, mlwe_params.poly_len_log2, 2); // double query a
 
 	let mut hint_final_0 = Vec::new(); // hint only made of a parts
 	for i in 0..2{
@@ -2249,6 +2338,8 @@ mod test {
 	//////////////////////query////////////////////////////////////
 
 ////////////////////////////////client creates query////////////////////////////
+
+	let mut y_client = YClient::new(&mut client, &params);
 
 	println!("making query");
 	let val_row: u32 = rng.gen_range(0..(db_rows as u32));
