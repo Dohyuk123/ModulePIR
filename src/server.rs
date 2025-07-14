@@ -2078,11 +2078,11 @@ mod test {
 	let rlwe_q_prime_2 = params.get_q_prime_2();
 
 	//256MB: 3, 2 //1GB: 4, 3 //8GB: 5, 5
-	params.db_dim_1 = 3;
-	params.db_dim_2 = 2;
+	params.db_dim_1 = 2;
+	params.db_dim_2 = 1;
 
 	let mut mlwe_params = params.clone();
-	mlwe_params.poly_len_log2 = 8;
+	mlwe_params.poly_len_log2 = 9;
 	mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
 	
 	let mut simple_params = mlwe_params.clone();
@@ -2445,78 +2445,10 @@ mod test {
 
 	println!("decrypting");
 
-	let mut double_response_a = Vec::new();
-	for ct_bytes in packed_mod_switched_a.iter() {
-	    let ct = PolyMatrixRaw::recover(&params, rlwe_q_prime_1, rlwe_q_prime_2, ct_bytes);
-	    double_response_a.push(ct);
-	}
-
-	let mut decomposed_a = PolyMatrixRaw::zero(&mlwe_params, 2, dimension);
-
-	for i in 0..2{
-	    let decrypt_a_parts = decrypt_ct_reg_measured(&y_client.inner, &params, &double_response_a[i].ntt(), 0);
-	    let mut poly_temp = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
-	    for j in 0..dimension{
-		for k in 0..mlwe_params.poly_len{
-		    poly_temp.data[mlwe_params.poly_len*j+k] = decrypt_a_parts.as_slice()[k*dimension+j];
-		}
-	    }
-	    for j in 0..params.poly_len{
-	        assert_eq!(poly_temp.data[j], hint_0s[i].raw().submatrix(0, target_col, dimension, 1).data[j]);
-	    }
-	    decomposed_a.as_mut_slice()[i*params.poly_len..(i+1)*params.poly_len].copy_from_slice(&poly_temp.as_slice());
-	}
-
-	let composed_a = &g_exp_56_ntt * &decomposed_a.ntt(); // decrypted a
-
-	let composed_a_raw = composed_a.raw();
-
-	let mut composed_a_recovered = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
-
-	for i in 0..composed_a_recovered.as_slice().len() {
-	    let val = composed_a_raw.data[i];
-	    composed_a_recovered.data[i] = rescale(val, rlwe_q_prime_2, params.modulus);
-	}
-
-	for i in 0..params.poly_len{
-	    assert_eq!(response_a_simple_raw_rescaled.submatrix(0, target_col, dimension, 1).data[i], composed_a.raw().data[i]);
-	}
-
-	//last_packed
-
-	
-	let double_response_b = PolyMatrixRaw::recover(&params, rlwe_q_prime_1, rlwe_q_prime_2, &res_switched_b);
-
-	let decrypt_b_part = decrypt_ct_reg_measured(&y_client.inner, &params, &double_response_b.ntt(), 0);
-	let mut poly_temp_b = PolyMatrixRaw::zero(&mlwe_params, 2, 1);
-	for j in 0..2{
-	    for k in 0..mlwe_params.poly_len{
-		poly_temp_b.data[mlwe_params.poly_len*j+k] = decrypt_b_part.as_slice()[k*dimension+j];
-	    }
-	    for k in 0..mlwe_params.poly_len {
-		assert_eq!(poly_temp_b.as_slice()[j*mlwe_params.poly_len..(j+1)*mlwe_params.poly_len][k], response_0s[j].submatrix(0, target_col, 1, 1).raw().data[k]);
-	    }
-	}
-
-	let composed_b = &g_exp_56_ntt * &poly_temp_b.ntt(); //decrypted b
-
-	let composed_b_raw = composed_b.raw();
-
-	let mut composed_b_recovered = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
-
-	for i in 0..composed_b_recovered.as_slice().len() {
-	    let val = composed_b_raw.data[i];
-	    composed_b_recovered.data[i] = rescale(val, rlwe_q_prime_1, params.modulus);
-	}
+	let dec_res = y_client.decode_response_mlwe(&mlwe_params, &packed_mod_switched_a, &res_switched_b, &g_exp_56_ntt, rlwe_q_prime_1, rlwe_q_prime_2);
 
 	for i in 0..mlwe_params.poly_len{
-	    assert_eq!(composed_b.raw().data[i], response_b_simple_rescaled.submatrix(0, target_col, 1, 1).data[i]);
-	}
-
-	let decrypted_answer = decrypt_mlwe_batch(&params, &mlwe_params, dimension, &composed_a_recovered.ntt(), &composed_b_recovered.ntt(), &y_client.inner);
-
-	for i in 0..mlwe_params.poly_len{
-	    assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, decrypted_answer[0].data[i]);
+	    assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, dec_res[0].data[i]);
 	}
 
 	println!("simple time: {:?}", start_0 - start);

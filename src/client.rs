@@ -7,6 +7,7 @@ use spiral_rs::{
     arith::*, client::*, discrete_gaussian::*, gadget::*, number_theory::*, params::*, poly::*
 };
 use crate::server::Precomp;
+use crate::modulus_switch::ModulusSwitch;
 
 use super::util::*;
 use super::convolution::negacyclic_matrix_u32;
@@ -764,199 +765,72 @@ impl<'a> YClient<'a> {
         out
     }
 
-    pub fn client(&self) -> &Client<'a> {
-        self.inner
-    }
-}
+    pub fn decode_response_mlwe(&self, mlwe_params: &'a Params, response_a: &Vec<Vec<u8>>, response_b: &[u8], g_exp_56_ntt: &PolyMatrixNTT, rlwe_q_prime_1: u64, rlwe_q_prime_2: u64) -> Vec<PolyMatrixRaw<'a>> {
 
+	let dimension = self.params.poly_len / mlwe_params.poly_len;
 
+	let mut double_response_a = Vec::new();
+	for ct_bytes in response_a.iter() {
+	    let ct = PolyMatrixRaw::recover(&self.params, rlwe_q_prime_1, rlwe_q_prime_2, ct_bytes);
+	    double_response_a.push(ct);
+	}
 
-pub struct NewClient<'a> {
-    inner: &'a mut Client<'a>,
-    params: &'a Params,
-    lwe_client: LWEClient,
-    pt_byte : usize,
-}
+	let mut decomposed_a = PolyMatrixRaw::zero(&mlwe_params, 2, dimension);
 
+	for i in 0..2{
+	    let decrypt_a_parts = decrypt_ct_reg_measured(&self.inner, &self.params, &double_response_a[i].ntt(), 0);
+	    let mut poly_temp = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
+	    for j in 0..dimension{
+		for k in 0..mlwe_params.poly_len{
+		    poly_temp.data[mlwe_params.poly_len*j+k] = decrypt_a_parts.as_slice()[k*dimension+j];
+		}
+	    }
+	    decomposed_a.as_mut_slice()[i*self.params.poly_len..(i+1)*self.params.poly_len].copy_from_slice(&poly_temp.as_slice());
+	}
 
-impl<'a> NewClient<'a> {
-    pub fn new(inner: &'a mut Client<'a>, params: &'a Params, pt_byte : usize) -> Self {
-        Self {
-            inner,
-            params,
-            lwe_client: LWEClient::new(LWEParams::default()),
-	    pt_byte,
-        }
-    }
+	let composed_a = g_exp_56_ntt * &decomposed_a.ntt(); // decrypted a
 
-    pub fn lwe_client(&self) -> &LWEClient {
-        &self.lwe_client
-    }
+	let composed_a_raw = composed_a.raw();
 
-    fn rlwes_to_lwes(&self, ct: &[PolyMatrixRaw<'a>]) -> Vec<u64> {
-        let v = ct
-            .iter()
-            .map(|ct| rlwe_to_lwe(self.params, ct))
-            .collect::<Vec<_>>();
-        concat_horizontal(&v, self.params.poly_len + 1, self.params.poly_len)
-    }
+	let mut composed_a_recovered = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
 
-    pub fn generate_query_impl(
-        &self,
-        public_seed_idx: u8,
-        dim_log2: usize,
-        packing: bool,
-        index: usize,
-	//pt_byte : usize
-    ) -> Vec<PolyMatrixRaw<'a>> {
-        // let db_cols = 1 << (self.params.db_dim_2 + self.params.poly_len_log2);
-        // let idx_dim1 = index / db_cols;
+	for i in 0..composed_a_recovered.as_slice().len() {
+	    let val = composed_a_raw.data[i];
+	    composed_a_recovered.data[i] = rescale(val, rlwe_q_prime_2, self.params.modulus);
+	}
 
-        let multiply_ct = true;
+	let double_response_b = PolyMatrixRaw::recover(&self.params, rlwe_q_prime_1, rlwe_q_prime_2, &response_b);
 
-        let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx));
+	let decrypt_b_part = decrypt_ct_reg_measured(&self.inner, &self.params, &double_response_b.ntt(), 0);
+	let mut poly_temp_b = PolyMatrixRaw::zero(&mlwe_params, 2, 1);
+	for j in 0..2{
+	    for k in 0..mlwe_params.poly_len{
+		poly_temp_b.data[mlwe_params.poly_len*j+k] = decrypt_b_part.as_slice()[k*dimension+j];
+	    }
+	}
 
-        // Generate dim1_bits LWE samples under public randomness
-        let mut out = Vec::new();
+	let composed_b = g_exp_56_ntt * &poly_temp_b.ntt(); //decrypted b
 
-        let scale_k = self.params.modulus / self.params.pt_modulus;
-	//println!("encrypt modulus: {}, polylen: {}, scale_k: {}", self.params.modulus, self.params.poly_len, scale_k);
+	let composed_b_raw = composed_b.raw();
 
-        for i in 0..(1 << dim_log2) {
-            let mut scalar = PolyMatrixRaw::zero(self.params, 1, 1);
-            let is_nonzero = i == (index / self.params.poly_len);
+	let mut composed_b_recovered = PolyMatrixRaw::zero(&mlwe_params, 1, 1);
 
-            if is_nonzero {
-                scalar.data[index % self.params.poly_len] = scale_k;
-            }
+	for i in 0..composed_b_recovered.as_slice().len() {
+	    let val = composed_b_raw.data[i];
+	    composed_b_recovered.data[i] = rescale(val, rlwe_q_prime_1, self.params.modulus);
+	}
 
-            if packing {
-		//println!("packing: {}", true);
-                let factor =
-                    invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
-                scalar = scalar_multiply_alloc(
-                    &PolyMatrixRaw::single_value(self.params, factor).ntt(),
-                    &scalar.ntt(),
-                )
-                .raw();
-            }
+	let decrypted_answer = decrypt_mlwe_batch(&self.params, &mlwe_params, dimension, &composed_a_recovered.ntt(), &composed_b_recovered.ntt(), &self.inner);
 
-            // if public_seed_idx == SEED_0 {
-            //     out.push(scalar.pad_top(1));
-            //     continue;
-            // }
-
-            let ct = if multiply_ct {
-		//println!("multiply_ct: {}", true);
-                let factor =
-                    invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
-
-                self.inner.encrypt_matrix_scaled_reg(
-                    &scalar.ntt(),
-                    &mut ChaCha20Rng::from_entropy(),
-                    &mut rng_pub,
-                    factor,
-                )
-            } else {
-	 	//println!("multiply_ct: {}", false);
-                self.inner.encrypt_matrix_reg(
-                    &scalar.ntt(),
-                    &mut ChaCha20Rng::from_entropy(),
-                    &mut rng_pub,
-                )
-            };
-
-            // let mut ct = self.inner.encrypt_matrix_reg(
-            //     &scalar.ntt(),
-            //     &mut ChaCha20Rng::from_entropy(),
-            //     &mut rng_pub,
-            // );
-
-            // if multiply_ct && packing {
-            //     let factor =
-            //         invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
-            //     ct = scalar_multiply_alloc(
-            //         &PolyMatrixRaw::single_value(self.params, factor).ntt(),
-            //         &ct,
-            //     );
-            // };
-
-            // if multiply_error && is_nonzero && packing {
-            //     let factor =
-            //         invert_uint_mod(self.params.poly_len as u64, self.params.modulus).unwrap();
-            //     ct = scalar_multiply_alloc(
-            //         &PolyMatrixRaw::single_value(self.params, factor).ntt(),
-            //         &ct,
-            //     );
-            // }
-
-            let ct_raw = ct.raw();
-            // let ct_0_nega = negacyclic_perm(ct_raw.get_poly(0, 0), 0, self.params.modulus);
-            // let ct_1_nega = negacyclic_perm(ct_raw.get_poly(1, 0), 0, self.params.modulus);
-            // let mut ct_nega = PolyMatrixRaw::zero(self.params, 2, 1);
-            // ct_nega.get_poly_mut(0, 0).copy_from_slice(&ct_0_nega);
-            // ct_nega.get_poly_mut(1, 0).copy_from_slice(&ct_1_nega);
-
-            // self-test
-            // {
-            //     let test_ct = self.inner.encrypt_matrix_reg(
-            //         &PolyMatrixRaw::single_value(self.params, scale_k * 7).ntt(),
-            //         &mut ChaCha20Rng::from_entropy(),
-            //         &mut ChaCha20Rng::from_entropy(),
-            //     );
-            //     let lwe = rlwe_to_lwe(self.params, &test_ct.raw());
-            //     let result = self.decode_response(&lwe);
-            //     assert_eq!(result[0], 7);
-            // }
-
-            out.push(ct_raw);
-        }
-
-        out
-    }
-
-    pub fn generate_query(
-        &self,
-        public_seed_idx: u8,
-        dim_log2: usize,
-        packing: bool,
-        index_row: usize,
-    ) -> Vec<PolyMatrixRaw<'a>> {
-        let out = self.generate_query_impl(public_seed_idx, dim_log2, packing, index_row);
-	out        
-	//let lwes = self.rlwes_to_lwes(&out);
-        //lwes
-    }
-
-    pub fn decode_response(&self, response: &[u64]) -> Vec<u64> {
-        debug!("Decoding response: {:?}", &response[..16]);
-        let db_cols = 1 << (self.params.db_dim_2 + self.params.poly_len_log2);
-
-        let sk = self.inner.get_sk_reg().as_slice().to_vec();
-
-        let mut out = Vec::new();
-        for col in 0..db_cols {
-            let mut sum = 0u128;
-            for i in 0..self.params.poly_len {
-                let v1 = response[i * db_cols + col];
-                let v2 = sk[i];
-                sum += v1 as u128 * v2 as u128;
-            }
-
-            sum += response[self.params.poly_len * db_cols + col] as u128;
-
-            let result = (sum % self.params.modulus as u128) as u64;
-            let result_rescaled = rescale(result, self.params.modulus, self.params.pt_modulus);
-            out.push(result_rescaled);
-        }
-
-        out
+	decrypted_answer
     }
 
     pub fn client(&self) -> &Client<'a> {
         self.inner
     }
 }
+
+
     #[cfg(not(target_feature = "avx2"))]
     pub fn mul() {
 	println!("using non-avx2 multiplication");
