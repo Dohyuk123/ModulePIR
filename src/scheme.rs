@@ -7,14 +7,14 @@ use rand_chacha::ChaCha20Rng;
 use spiral_rs::aligned_memory::AlignedMemory64;
 use spiral_rs::arith::rescale;
 use spiral_rs::poly::{PolyMatrix, PolyMatrixRaw};
-use spiral_rs::{client::*, params::*};
+use spiral_rs::{client::*, params::*, gadget::*};
 
 use crate::bits::{read_bits, u64s_to_contiguous_bytes};
 use crate::modulus_switch::ModulusSwitch;
 use crate::noise_analysis::YPIRSchemeParams;
 use crate::packing::condense_matrix;
 
-use super::{client::*, lwe::LWEParams, measurement::*, params::*, server::*};
+use super::{client::*, lwe::LWEParams, measurement::*, params::*, server::*, packing::*};
 
 pub const STATIC_PUBLIC_SEED: [u8; 32] = [0u8; 32];
 pub const SEED_0: u8 = 0;
@@ -71,6 +71,190 @@ impl Sample for u16 {
     fn sample() -> Self {
         fastrand::u16(..)
     }
+}
+
+pub fn run_module_pir_on_params (params: &Params, mlwe_params: &Params, simple_params: &Params) {
+    let rlwe_q_prime_1 = params.get_q_prime_1();
+    let rlwe_q_prime_2 = params.get_q_prime_2();
+
+    let dimension = params.poly_len / mlwe_params.poly_len;
+
+    let mut client = Client::init(&params);
+    client.generate_secret_keys();
+
+///////////////////////for keyswitching/////////////////////////
+
+    let tmp_scale = 1<<(params.poly_len_log2 -mlwe_params.poly_len_log2-1);
+    let t_exp = params.t_exp_left;
+    let auto_table = generate_automorph_tables_brute_force(&mlwe_params); //automorphism table for mlwe
+    let pack_seed = [1u8; 32];
+
+    let (expansion_key_a, expansion_key_b) = generate_query_expansion_key(&params, &mlwe_params, t_exp, &mut ChaCha20Rng::from_entropy(), &mut ChaCha20Rng::from_seed(pack_seed), &mut client); // key switching keys for lwe to mlwe
+
+    let expansion_table_pos = create_packing_table_mlwe_pos(&mlwe_params); // expansion table for lwe to mlwe
+    let expansion_table_neg = create_packing_table_mlwe_neg(&mlwe_params);
+
+    let y_constants = generate_y_constants(&params);
+	
+    let pack_pub_params = raw_generate_expansion_params( // mlwe to rlwe compression key
+        &params,
+        client.get_sk_reg(),
+        mlwe_params.poly_len_log2,
+        params.t_exp_left,
+        &mut ChaCha20Rng::from_entropy(),
+        &mut ChaCha20Rng::from_seed(pack_seed),
+    );
+
+    let mut fake_pack_pub_params = pack_pub_params.clone();
+        // zero out all of the second rows
+    for i in 0..pack_pub_params.len() {
+        for col in 0..pack_pub_params[i].cols {
+            fake_pack_pub_params[i].get_poly_mut(1, col).fill(0);
+        }
+    }
+
+    let mut pack_pub_params_row_1s = pack_pub_params.clone();
+    for i in 0..pack_pub_params.len() {
+        pack_pub_params_row_1s[i] =
+            pack_pub_params[i].submatrix(1, 0, 1, pack_pub_params[i].cols);
+        pack_pub_params_row_1s[i] = condense_matrix(&params, &pack_pub_params_row_1s[i]);
+    }
+
+/////////////////////////////////////////////////////////////////////////////////////////
+
+    let db_rows: usize = 1<<(params.db_dim_1 + params.poly_len_log2); // db_row : first query length
+    let db_cols: usize = 1<<(params.db_dim_2 + params.poly_len_log2); // db_col : second query length
+
+    let query_row_size = 7 * db_rows;
+    let query_col_size = 7 * db_cols;
+    let simple_packing_key_size = 7 * params.poly_len * mlwe_params.poly_len_log2;
+    let double_packing_key_size = 7 * params.poly_len * (params.poly_len_log2 - mlwe_params.poly_len_log2);    
+
+    let response_size = 3 * 6 * params.poly_len;
+
+    let communication_cost = query_row_size + query_col_size + simple_packing_key_size + double_packing_key_size + response_size;
+
+    println!("communication cost: {}", communication_cost);
+
+    println!("rows: {}, cols: {}", db_rows, db_cols);
+    let mut rng = rand::thread_rng();
+	
+    let mut matrix = Vec::with_capacity(db_rows * db_cols); // database matrix
+
+    for i in 0..db_rows{
+	for j in 0..db_cols{
+	    let value: u16 = rng.gen(); // 0 ~ 65535 중 임의의 값
+            matrix.push(value);
+	}
+    }	
+
+    let server: YServer<u16> = YServer::<u16>::new( // database
+	&params,
+	matrix.into_iter(),
+	false,
+	true,
+	false
+    );
+
+	//let mut y_client = YClient::new(&mut client, &params);
+
+    let g_exp = build_gadget(&simple_params, 1, 2); // for gadget decomposition
+	
+    let mut g_exp_56 = PolyMatrixRaw::zero(&mlwe_params, 1, 2);
+    g_exp_56.as_mut_slice().copy_from_slice(&g_exp.as_slice());
+    let g_exp_56_ntt = g_exp_56.ntt();
+
+    let mut g_inv_a = PolyMatrixRaw::zero(&simple_params, dimension * 2, db_cols / mlwe_params.poly_len);
+    let mut g_inv_a_56 = PolyMatrixRaw::zero(&mlwe_params, dimension * 2, db_cols / mlwe_params.poly_len);
+    let mut g_inv_b = PolyMatrixRaw::zero(&simple_params, 2, db_cols / mlwe_params.poly_len);
+    let mut g_inv_b_56 = PolyMatrixRaw::zero(&mlwe_params, 2, db_cols / mlwe_params.poly_len);
+
+    println!("making keyswitching keys");
+
+
+	///////////////////////////////////////////////////////////////
+	///////////////////////hint preprocessing//////////////////////
+	///////////////////////////////////////////////////////////////
+
+    println!("offline preprocessing");
+
+    let (packed_a_vec, decomp_a, hint_0s, double_query_a) = server.perform_offline_precomputation_mlwe (
+	&mlwe_params, 
+	&simple_params, 
+	dimension,
+	t_exp, 
+	db_cols, 
+	&expansion_key_a,
+	&fake_pack_pub_params, 
+	&y_constants, 
+	&mut g_inv_a, 
+	&mut g_inv_a_56, 
+	&auto_table, 
+	&expansion_table_neg, 
+	&expansion_table_pos, 
+    );
+
+
+/////////////////////////preprocessing finished////////////////////////////
+	
+///////////////////////////////////////////////////////////////
+//////////////////////query////////////////////////////////////
+
+////////////////////////////////client creates query////////////////////////////
+
+    let mut y_client = YClient::new(&mut client, &params);
+
+    println!("making query");
+    let val_row: u32 = rng.gen_range(0..(db_rows as u32));
+    let val_col: u16 = rng.gen_range(0..((db_cols / mlwe_params.poly_len) as u16));
+    let target_row = val_row as usize;
+    let target_col = val_col as usize;	
+
+	// simple query
+    let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, target_row); // query b -> b part
+    let query_col_last_row = &query_col[params.poly_len * db_rows..];
+    let packed_query_col = pack_query(&params, query_col_last_row); // query b // row: 16384
+
+	//double query
+    let double_query_b = y_client.generate_query_double_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2,  mlwe_params.poly_len_log2, target_col); // col: 8192
+
+////////////////////////////////online computation////////////////////////////////
+
+    let start = Instant::now();
+
+    let (packed_mod_switched_a, res_switched_b) = server.perform_online_computation_mlwe (
+	&mlwe_params, 
+	&simple_params, 
+	dimension, 
+	t_exp, 
+	db_cols, 
+	&expansion_key_b, 
+	&y_constants, 
+	&fake_pack_pub_params, 
+	&pack_pub_params_row_1s, 
+	&auto_table, 
+	&expansion_table_neg, 
+	&expansion_table_pos, 
+	decomp_a, 
+	&hint_0s, 
+	&double_query_a,
+	&packed_a_vec, 
+	&mut g_inv_b, 
+	&mut g_inv_b_56, 
+	&double_query_b, 
+	&packed_query_col 
+    );
+
+    println!("decrypting");
+
+    let dec_res = y_client.decode_response_mlwe(&mlwe_params, &packed_mod_switched_a, &res_switched_b, &g_exp_56_ntt, rlwe_q_prime_1, rlwe_q_prime_2);
+
+    for i in 0..mlwe_params.poly_len{
+	assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, dec_res[0].data[i]);
+    }
+    let end = Instant::now();
+
+    println!("total time: {:?}", end - start);
 }
 
 pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) -> Measurement {

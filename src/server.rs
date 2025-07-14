@@ -1422,8 +1422,6 @@ where
 	for i in 0..2{
 	    response_0s.push(g_inv_b_ntt.submatrix(i, 0, 1, db_cols / mlwe_params.poly_len));  // db * b1 gadget
 	}
-	
-	let start_1 = Instant::now();
 
 	//let mut response_0_times_hint_double_vec = Vec::new(); // b1 times A2
 	for i in 0..2{
@@ -1537,8 +1535,6 @@ where
 	    &last_precomp_tables,
 	    &y_constants,
 	);
-
-	let end = Instant::now();
 
 	//modulus switch
 
@@ -2370,7 +2366,7 @@ mod test {
     }
 
     #[test]
-    fn test_whole_protocol(){ // start : row: 16384 / second : col:8192
+    fn test_module_pir_fn(){ // start : row: 16384 / second : col:8192
 
 	println!("creating server");
 
@@ -2565,6 +2561,8 @@ mod test {
 	}
 	
 	println!("total time: {:?}", end - start);
+
+	println!("end of the protocol");
 
     }
 
