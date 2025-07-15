@@ -1385,27 +1385,26 @@ where
 	let mut last_pack_a_vec = Vec::new(); // final pack input a 
 	let mut last_b_values = Vec::new();
 	let mut tmp_last_rlwe_poly = PolyMatrixRaw::zero(&self.params, 1, 1);
-
+	
 ///////////////////////////////response starts/////////////////////////////
 
-	println!("online computation");
-
-	let start = Instant::now();
+	let start_simple_response = Instant::now();
 
 	//simple response
 	let response: AlignedMemory64 = self.answer_query(packed_query_col.as_slice()); 
 
-	//let start_0 = Instant::now();
+	let end_simple_response = Instant::now();
 
 	//pack simple response into mlwe
+
+	let start_simple_pack = Instant::now();
 	let response_b_simple = pack_lwes_to_mlwe_db(&self.params, &mlwe_params, &response, dimension, t_exp, &expansion_key_b, &auto_table, &expansion_table_neg, &expansion_table_pos, decomp_a);
+	let end_simple_pack = Instant::now();	
 
-	//let st = Instant::now();
-
+	let decomp_start = Instant::now();
 	let transposed_array_b = transpose_poly(&mlwe_params, &response_b_simple);
 	response_b_simple_transposed.as_mut_slice().copy_from_slice(transposed_array_b.as_slice());
 
-	let res_start = Instant::now();
 	for i in 0..response_b_simple_rescaled.as_slice().len() {
 	    response_b_simple_rescaled.data[i] = rescale(response_b_simple_transposed.data[i], self.params.modulus, rlwe_q_prime_1);
 	}
@@ -1422,6 +1421,10 @@ where
 	for i in 0..2{
 	    response_0s.push(g_inv_b_ntt.submatrix(i, 0, 1, db_cols / mlwe_params.poly_len));  // db * b1 gadget
 	}
+	let decomp_end = Instant::now();
+
+
+	let double_start = Instant::now();
 
 	//let mut response_0_times_hint_double_vec = Vec::new(); // b1 times A2
 	for i in 0..2{
@@ -1440,8 +1443,11 @@ where
 	    let hint_0_times_response_1 = &hint_0s[i] * double_query_b;// db*A1 gadget / times / b2
 	    hint_0_times_response_1_vec.push(hint_0_times_response_1);
 	}
+	let double_end = Instant::now();
 
 	////////////////////mlwe to rlwe packing//////////////////////////
+
+	let double_pack_start = Instant::now();
 
 	for num in 0..2{
 	    let mut b_values = Vec::new();
@@ -1535,6 +1541,7 @@ where
 	    &last_precomp_tables,
 	    &y_constants,
 	);
+	let double_pack_end = Instant::now();
 
 	//modulus switch
 
@@ -1547,8 +1554,15 @@ where
 	
 	let res_b = last_packed.raw();
 	let res_switched_b = res_b.switch(rlwe_q_prime_1, rlwe_q_prime_2);
-	
-	//let end = Instant::now();
+
+	let simple_response_time = end_simple_response - start_simple_response;
+	let simple_pack_time = end_simple_pack - start_simple_pack;
+	let decomp_time = decomp_end - decomp_start;
+	let double_time = double_end - double_start;
+	let double_pack_time = double_pack_end - double_pack_start;
+	let total_time = double_pack_end - start_simple_response;
+
+	println!("simple response time : {:?} \n simple packing time : {:?} \n decomposition time : {:?} \n double response time : {:?} \n double packing time : {:?} \n\n total time : {:?}", simple_response_time, simple_pack_time, decomp_time, double_time, double_pack_time, total_time);
 
 	(packed_mod_switched_a, res_switched_b)
 

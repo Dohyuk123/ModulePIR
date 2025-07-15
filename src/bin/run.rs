@@ -1,4 +1,5 @@
-use ypir::scheme::run_ypir_batched;
+use ypir::scheme::run_module_pir_on_params;
+use ypir::params::params_for_scenario;
 
 use clap::Parser;
 
@@ -6,96 +7,46 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Number of items in the database
-    num_items: usize,
-    /// Size of each item in bits (optional, default 1), values over 8 are unsupported
-    item_size_bits: Option<usize>,
-    /// Number of clients (optional, default 1)
-    /// to perform cross-client batching over
-    num_clients: Option<usize>,
-    /// Number of trials (optional, default 5)
-    /// to run the YPIR scheme and average performance measurements over (a warmup trial is excluded)
-    trials: Option<usize>,
-    /// Verbose mode (optional)
-    /// if set, run as SimplePIR
-    #[clap(long, short, action)]
-    is_simplepir: bool,
-    /// Output report file (optional)
-    /// where results will be written in JSON.
-    out_report_json: Option<String>,
-    /// Verbose mode (optional)
-    /// if set, the program will print debug logs to stderr.
-    #[clap(long, short, action)]
-    verbose: bool,
+    item_size_bytes: Option<usize>
 }
 
 fn main() {
     let args = Args::parse();
     let Args {
-        num_items,
-        item_size_bits,
-        num_clients,
-        trials, // 5
-        out_report_json,
-        verbose,
-        is_simplepir, // false
+        item_size_bytes,
     } = args;
 
-    if verbose {
-        println!("Running in verbose mode.");
-        env_logger::Builder::new()
-            .filter_level(log::LevelFilter::Debug)
-            .write_style(env_logger::WriteStyle::Always)
-            .init();
-    } else {
-        env_logger::init();
+    let item_size_bytes = item_size_bytes.unwrap_or(256) as u32;
+
+    if item_size_bytes > 2048 {
+	panic!("Items must be smaller than 2048 bytes!");
     }
 
-    let item_size_bits = item_size_bits.unwrap_or(1);
-    let num_clients = num_clients.unwrap_or(1);
-    let trials = trials.unwrap_or(5);
-
-    if item_size_bits > 8 && !is_simplepir {
-        panic!("Items can be at must be at most 8 bits.");
+    if item_size_bytes <= 8 {
+	panic!("Items must be larger than 8 bytes!");
     }
 
-    //println!("is_simplePIR: {}", is_simplepir); // false
-    if is_simplepir {
-        assert_eq!(num_clients, 1, "SimplePIR variant only supports 1 client.");
-    }
+    let mlwe_bit = 32 - item_size_bytes.leading_zeros() - 1;
 
-    println!(
-        "Running YPIR ({}) on a database of {} bits, and performing cross-client batching over {} clients. \n\
-        The server performance measurement will be averaged over {} trials.",
-        if is_simplepir { "w/ SimplePIR" } else { "w/ DoublePIR" },
-        num_items * item_size_bits,
-        num_clients,
-        trials
-    );
+    let mut params = params_for_scenario(1<<30, 1);
+    params.pt_modulus = 1<<16;
+    
+    //256MB: 3, 2 //1GB: 4, 3 //8GB: 5, 5
+    params.db_dim_1 = 6;
+    params.db_dim_2 = 6;
 
-    let measurement =
-        run_ypir_batched(num_items, item_size_bits, num_clients, is_simplepir, trials);
-/////////////////////////////////////////////////
-    //let params = params_for_scenario(1<<30, 1);
-    //let mut client = Client::init(&params);
-    //client.generate_secret_keys();
-    //let mut rng_pub = ChaCha20Rng::from_seed(get_seed(1));
+    let mut mlwe_params = params.clone();
+    mlwe_params.poly_len_log2 = mlwe_bit as usize;
+    mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
+
+    println!("mlwe_dimension : {}", mlwe_params.poly_len);
 	
-    //let mut plaintext_1 = PolyMatrixRaw::zero(params, 1, 1);
-    //let mut plaintext_2 = PolyMatrixRaw::zero(params, 1, 1);
-    //plaintext_2.as_slice()[0] = 1;
-    //println!("{:?}", plaintext_1.as_slice());
-/////////////////////////////////////////////////
-    println!(
-        "Measurement completed. See the README for details on what the following fields mean."
-    );
-    println!("Result:");
-    println!("{}", serde_json::to_string_pretty(&measurement).unwrap());
+    let mut simple_params = mlwe_params.clone();
+    simple_params.modulus = 1<<30;
+    simple_params.modulus_log2 = 30;
 
-    if let Some(out_report_json) = out_report_json {
-        println!("Writing report to {}", out_report_json);
-        let mut file = std::fs::File::create(out_report_json).unwrap();
-        serde_json::to_writer_pretty(&mut file, &measurement).unwrap();
-        println!("Report written.");
-    }
+    run_module_pir_on_params(&params, &mlwe_params, &simple_params);
+
+    
+
 }

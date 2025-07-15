@@ -127,14 +127,14 @@ pub fn run_module_pir_on_params (params: &Params, mlwe_params: &Params, simple_p
 
     let query_row_size = 7 * db_rows;
     let query_col_size = 7 * db_cols;
-    let simple_packing_key_size = 7 * params.poly_len * mlwe_params.poly_len_log2;
-    let double_packing_key_size = 7 * params.poly_len * (params.poly_len_log2 - mlwe_params.poly_len_log2);    
+
+    let simple_packing_key_size = 7 * params.poly_len * mlwe_params.poly_len_log2 * t_exp;
+    let double_packing_key_size = 7 * params.poly_len * (params.poly_len_log2 - mlwe_params.poly_len_log2) * t_exp;   
+    let total_packing_key_size = simple_packing_key_size + double_packing_key_size; 
 
     let response_size = 3 * 6 * params.poly_len;
 
     let communication_cost = query_row_size + query_col_size + simple_packing_key_size + double_packing_key_size + response_size;
-
-    println!("communication cost: {}", communication_cost);
 
     println!("rows: {}, cols: {}", db_rows, db_cols);
     let mut rng = rand::thread_rng();
@@ -156,7 +156,7 @@ pub fn run_module_pir_on_params (params: &Params, mlwe_params: &Params, simple_p
 	false
     );
 
-	//let mut y_client = YClient::new(&mut client, &params);
+    let db_size = db_rows * db_cols * 2;
 
     let g_exp = build_gadget(&simple_params, 1, 2); // for gadget decomposition
 	
@@ -168,9 +168,6 @@ pub fn run_module_pir_on_params (params: &Params, mlwe_params: &Params, simple_p
     let mut g_inv_a_56 = PolyMatrixRaw::zero(&mlwe_params, dimension * 2, db_cols / mlwe_params.poly_len);
     let mut g_inv_b = PolyMatrixRaw::zero(&simple_params, 2, db_cols / mlwe_params.poly_len);
     let mut g_inv_b_56 = PolyMatrixRaw::zero(&mlwe_params, 2, db_cols / mlwe_params.poly_len);
-
-    println!("making keyswitching keys");
-
 
 	///////////////////////////////////////////////////////////////
 	///////////////////////hint preprocessing//////////////////////
@@ -211,6 +208,8 @@ pub fn run_module_pir_on_params (params: &Params, mlwe_params: &Params, simple_p
     let target_col = val_col as usize;	
 
 	// simple query
+    let query_process_start = Instant::now();
+
     let query_col = y_client.generate_query_mlwe(SEED_1, params.db_dim_1, mlwe_params.poly_len_log2, true, target_row); // query b -> b part
     let query_col_last_row = &query_col[params.poly_len * db_rows..];
     let packed_query_col = pack_query(&params, query_col_last_row); // query b // row: 16384
@@ -218,9 +217,12 @@ pub fn run_module_pir_on_params (params: &Params, mlwe_params: &Params, simple_p
 	//double query
     let double_query_b = y_client.generate_query_double_mlwe(&mlwe_params, SEED_0, dimension, params.db_dim_2,  mlwe_params.poly_len_log2, target_col); // col: 8192
 
-////////////////////////////////online computation////////////////////////////////
+    let query_process_end = Instant::now();
 
-    let start = Instant::now();
+    let query_process_time_ms = query_process_end - query_process_start;
+    println!("\nquery processing time: {:?}\n", query_process_time_ms);
+
+////////////////////////////////online computation////////////////////////////////
 
     let (packed_mod_switched_a, res_switched_b) = server.perform_online_computation_mlwe (
 	&mlwe_params, 
@@ -245,17 +247,25 @@ pub fn run_module_pir_on_params (params: &Params, mlwe_params: &Params, simple_p
 	&packed_query_col 
     );
 
-    println!("decrypting");
+    println!("\ndecrypting");
 
+    let decode_start = Instant::now();
     let dec_res = y_client.decode_response_mlwe(&mlwe_params, &packed_mod_switched_a, &res_switched_b, &g_exp_56_ntt, rlwe_q_prime_1, rlwe_q_prime_2);
+    let decode_end = Instant::now();
+    let decode_time_ms = decode_end - decode_start;
+
+    println!("decryption time : {:?}", decode_time_ms);
 
     for i in 0..mlwe_params.poly_len{
 	assert_eq!(server.db()[(target_col*mlwe_params.poly_len+i)*db_rows + target_row] as u64, dec_res[0].data[i]);
     }
-    let end = Instant::now();
 
-    println!("total time: {:?}", end - start);
+    println!();
+    println!("communication cost");
+    println!("row query size : {} \n col query size : {} \n simple packing key size : {} \n double packing key size : {} \n total packing key size : {} \n response size : {} \n\n total communication cost : {}", query_row_size, query_col_size, simple_packing_key_size, double_packing_key_size, total_packing_key_size, response_size, communication_cost);
+
 }
+
 
 pub fn run_simple_ypir_on_params<const K: usize>(params: Params, trials: usize) -> Measurement {
     assert_eq!(K, 1); // for now
