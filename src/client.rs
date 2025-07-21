@@ -13,6 +13,22 @@ use super::util::*;
 use super::convolution::negacyclic_matrix_u32;
 use super::{lwe::*, noise_analysis::measure_noise_width_squared, scheme::*, util::*, server::*};
 
+fn poly_mul_mod(a: &[i64], b: &[i64], modulus: i64) -> Vec<i64> {
+    let n = a.len();
+    let mut result = vec![0i64; 2 * n - 1]; // 최대 차수는 2n - 2
+
+    for i in 0..n {
+        for j in 0..n {
+            result[i + j] = (result[i + j] + a[i] * b[j]) % modulus;
+            if result[i + j] < 0 {
+                result[i + j] += modulus; // 음수 보정
+            }
+        }
+    }
+
+    result
+}
+
 pub fn mlwe_to_mlwe_sk(params: &Params, a: &Vec<u8>, mlwe_dim: usize, n: usize) -> Vec<u8>{
     let mut combined_vec: Vec<u8> = vec![0; n]; // Allocate memory once
     let half_mlwe_dim = mlwe_dim / 2;
@@ -989,25 +1005,13 @@ mod test {
 	//poly_2.data[6144] = 6;
 	//poly_2.data[6145] = 5;
 	let mut poly_1_ntt = poly_1.ntt();
-	//println!("{:?}", poly_1_ntt.as_slice());
+
 	let mut poly_2_ntt = poly_2.ntt();
 	let mut res_poly_ntt = PolyMatrixNTT::zero(&params, 2, 1);
-
-	//add_into(&mut poly_2_ntt, &mut poly_1_ntt);
-	//println!("poly2: {:?}", poly_2_ntt.raw().as_slice());
-	//println!("{:?}", res	
-	//multiply(&mut res_poly_ntt, &poly_1_ntt, &poly_2_ntt);	 // 2 by 1  *  1 by 1
-	//scalar_multiply_avx(&mut res_poly_ntt, &poly_1_ntt, &poly_2_ntt);	
+	
 	multiply_poly(&params, res_poly_ntt.get_poly_mut(0, 0), poly_1_ntt.get_poly(0, 0), poly_2_ntt.get_poly(0, 0));
 
 	println!("res: {:?}", res_poly_ntt.raw().as_slice());
-	
-	
-	//println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 0)[0], res_poly_ntt.raw().get_poly(0, 0)[1], res_poly_ntt.raw().get_poly(0, 0)[2]); // how to print
-	//println!("{} {} {}", res_poly_ntt.raw().get_poly(0, 1)[0], res_poly_ntt.raw().get_poly(0, 1)[1], res_poly_ntt.raw().get_poly(0, 1)[2]); // how to print
-
-	
-	//assert_eq!(poly_1_ntt.get_poly(1, 0), poly_2_ntt.get_poly(0, 1));
 	
     }
     
@@ -1202,8 +1206,8 @@ mod test {
 
 	println!("{}, {}", row, col);
 
-	new_params.modulus = 1<<30;
-	new_params.modulus_log2 = 30;
+	new_params.modulus = 1<<26;
+	new_params.modulus_log2 = 26;
 	println!("{:?}", new_params.modulus);
 
 	let g_exp = build_gadget(&new_params, 1, 2);

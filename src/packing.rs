@@ -514,7 +514,7 @@ pub fn pack_lwes_to_mlwe_db<'a>(
     auto_table : &[Vec<usize>],
     expansion_table_neg: &[PolyMatrixNTT<'a>],
     expansion_table_pos: &[PolyMatrixNTT<'a>], 
-    decomp_a_mult: Vec<Vec<PolyMatrixNTT<'a>>>,
+    decomp_a_mult: &[Vec<PolyMatrixNTT<'a>>],
 ) -> PolyMatrixRaw<'a> {
     //let mut ct_vec_b = Vec::new();
     let db_cols = 1<<(params.db_dim_2 + params.poly_len_log2);

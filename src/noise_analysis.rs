@@ -45,6 +45,11 @@ fn sigma_2_double(
         * (sigma_2.powi(2) / 4.0)
         * (l_2 * p.powi(2) + (d_2.powi(2) - 1.0) * (t * d_2 * z.powi(2)) / 3.0);
 
+    
+
+    println!("l2, p, term1, term2 : {}, {}, {}, {}", l_2, p, term1, term2);
+    println!("term1 + term2 = {}", term1 + term2);
+
     term1 + term2
 }
 
@@ -174,7 +179,8 @@ impl YPIRSchemeParams {
     }
 
     pub fn delta_double(&self) -> (f64, f64) {
-        delta_double(
+	println!("z : {}", self.z());        
+	delta_double(
             self.d2,
             self.q2,
             self.q2_2_prime,
@@ -189,7 +195,9 @@ impl YPIRSchemeParams {
     pub fn delta(&self) -> f64 {
         let (delta_simple, _) = self.delta_simple();
         let (delta_double, _) = self.delta_double();
-        delta_simple + delta_double
+	println!("delta simple, delta double: {} {}", delta_simple, delta_double);
+	delta_simple + delta_double
+
     }
 
     /// The square of the subgaussian parameter for the outer ciphertext noise.
@@ -266,10 +274,37 @@ mod tests {
 
     #[test]
     fn test_ypir_scheme_params() {
-        let ysp = YPIRSchemeParams::default();
+        let mut ysp = YPIRSchemeParams::default();
+
+	let lwe_params = LWEParams::default();
+	let mut params = params_for_scenario(1<<30, 8);
+	params.db_dim_1 = 1<<18;
+	params.db_dim_2 = 1<<18;
+	params.pt_modulus = 1<<8;
+	params.modulus = 1<<46;
+
+	let mut ysp_tmp = YPIRSchemeParams::from_params(&params, &lwe_params);
 
         let total_log2_delta = ysp.delta().log2();
-        debug!("total_log2_delta: {}", total_log2_delta);
+        println!("total_log2_delta: {}", total_log2_delta);
+
+        assert!(total_log2_delta < -40.);
+
+	println!("q2 : {}", ysp.q2);
+
+	//ysp.p2 = (1<<8) as f64;
+	//ysp.q2 = 66974689739603970 as f64;
+	//ysp.q2 = 281474976710656 as f64;
+	//ysp.l2 = (1<<) as f64;
+	//println!("{}, {}", ysp.q2_1_prime, ysp.q2_2_prime); // 1 is larger
+	//ysp.q2_2_prime = (1<<30) as f64;
+	//println!("{}", ysp.l2);
+
+	println!("\ntmp!!!!!!!!!!!!!!\n");
+
+
+        let total_log2_delta = ysp_tmp.delta().log2();
+        println!("total_log2_delta: {}", total_log2_delta);
 
         assert!(total_log2_delta < -40.);
     }
