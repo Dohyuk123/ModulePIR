@@ -484,8 +484,8 @@ pub fn run_module_pir_on_params_no_fn (mlwe_bit: u32) {
     params.pt_modulus = 1<<16;
     
     //256MB: 3, 2 //1GB: 4, 3 //8GB: 5, 5
-    params.db_dim_1 = 3;
-    params.db_dim_2 = 2;
+    params.db_dim_1 = 6;
+    params.db_dim_2 = 6;
 
 
 
@@ -882,7 +882,7 @@ pub fn run_module_pir_on_params (mlwe_bit: u32){//params: &Params, mlwe_params: 
     let mut params = params_for_scenario(1<<30, 1);
     //params.pt_modulus = 1<<15;
     
-    //256MB: 3, 2 //1GB: 4, 3 //2GB: 4, 4 //8GB: 5, 5
+    //256MB: 3, 2 //1GB: 4, 3 //2GB: 4, 4 //8GB: 5, 5 // 32GB: 6, 6
     params.db_dim_1 = 6;
     params.db_dim_2 = 6;
 

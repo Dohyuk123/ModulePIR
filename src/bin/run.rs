@@ -29,7 +29,7 @@ fn main() {
 
     let mlwe_bit = 32 - item_size_bytes.leading_zeros() - 1;
 
-    test_module_pir_on_params_no_fn(mlwe_bit);
-    //run_module_pir_on_params(mlwe_bit);
+    //test_module_pir_on_params_no_fn(mlwe_bit);
+    run_module_pir_on_params(mlwe_bit);
 
 }

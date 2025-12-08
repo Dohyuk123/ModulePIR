@@ -255,9 +255,65 @@ where
     result_u64
 }
 
+pub fn multiply_matrices_raw_not_transposed_chunked<T>(
+    params: &Params,
+    a: &[u64],
+    a_rows: usize,
+    a_cols: usize,
+    b: &[T], // NOT transposed
+    b_rows: usize,
+    b_cols: usize,
+) -> Vec<u64>
+where
+    T: ToU64 + Copy,
+{
+    assert_eq!(a_cols, b_rows);
+
+    const CHUNK: usize = 16384;
+    let q = params.modulus;
+
+    // 결과는 u64로 바로 유지 (항상 mod q 범위에 있게)
+    let mut result = vec![0u64; a_rows * b_cols];
+
+    for i in 0..a_rows {
+        for j in 0..b_cols {
+            // (i,j) 원소 누적값을 u128에서 chunk 단위로 관리
+            let mut acc: u128 = 0;
+            let mut chunk_count: usize = 0;
+
+            for k in 0..a_cols {
+                let a_idx = i * a_cols + k;
+                let b_idx = k * b_cols + j;
+
+                unsafe {
+                    let a_val = *a.get_unchecked(a_idx);
+                    let b_val = (*b.get_unchecked(b_idx)).to_u64();
+
+                    acc += (a_val as u128) * (b_val as u128);
+                }
+
+                chunk_count += 1;
+
+                // CHUNK마다 acc를 mod q로 줄여 overflow 방지
+                if chunk_count == CHUNK {
+                    acc = barrett_reduction_u128(params, acc) as u128;
+                    chunk_count = 0;
+                }
+            }
+
+            // 마지막 남은 acc도 최종 reduce
+            let final_red = barrett_reduction_u128(params, acc);
+            result[i * b_cols + j] = final_red % q;
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod test {
     use spiral_rs::poly::*;
+    use std::{arch::x86_64::*, time::Instant};
 
     use super::super::transpose::transpose_generic;
     use super::*;
@@ -371,11 +427,13 @@ mod test {
 
     #[test]
 fn test_negacyclic_mul_general_dims() {
-    let params = test_params();
+    let mut params = test_params();
+    params.poly_len = 128;
+    params.poly_len_log2 = 7;
 
     // A: 3×2 polys, B: 2×3 polys
-    let pol_a = PolyMatrixRaw::random(&params, 5, 2);
-    let pol_b = PolyMatrixRaw::random(&params, 2, 3);
+    let pol_a = PolyMatrixRaw::random(&params, 1, 4096);
+    let pol_b = PolyMatrixRaw::random(&params, 4096, 1);
 
     let m = pol_a.rows;        // 3
     let n = pol_a.cols;        // 2
@@ -393,7 +451,7 @@ fn test_negacyclic_mul_general_dims() {
 
     // 3) raw matmul
     // prod_big shape: m × (k*d)
-    let prod_big = multiply_matrices_raw_not_transposed(
+    let prod_big = multiply_matrices_raw_not_transposed_chunked(
         &params,
         &a_big,
         m,
@@ -405,6 +463,9 @@ fn test_negacyclic_mul_general_dims() {
     assert_eq!(prod_big.len(), m * k * d);
 
     // 4) NTT 기반 정답
+
+    
+
     let pol_c = (&pol_a.ntt() * &pol_b.ntt()).raw();
     assert_eq!(pol_c.rows, m);
     assert_eq!(pol_c.cols, k);
