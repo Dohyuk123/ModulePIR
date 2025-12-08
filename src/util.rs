@@ -133,6 +133,57 @@ pub fn concat_horizontal(v_a: &[Vec<u64>], a_rows: usize, a_cols: usize) -> Vec<
     out
 }
 
+/// A(m×n poly matrix) -> A_big (m × (n*d)) row-concat
+fn poly_matrix_to_row_concat<'a>(a: &PolyMatrixRaw<'a>) -> Vec<u64> {
+    let params = a.params;
+    let m = a.rows;
+    let n = a.cols;
+    let d = params.poly_len;
+
+    let mut out = vec![0u64; m * n * d];
+
+    for i in 0..m {
+        for j in 0..n {
+            let poly = a.get_poly(i, j);
+            let base = i * (n * d) + j * d;
+            out[base..base + d].copy_from_slice(poly);
+        }
+    }
+
+    out
+}
+
+/// B(n×k poly matrix) -> B_big ((n*d) × (k*d)) negacyclic-block
+fn poly_matrix_to_negacyclic_block<'a>(b: &PolyMatrixRaw<'a>) -> Vec<u64> {
+    let params = b.params;
+    let n = b.rows;
+    let k = b.cols;
+    let d = params.poly_len;
+    let q = params.modulus;
+
+    let mut out = vec![0u64; (n * d) * (k * d)];
+
+    for i in 0..n {
+        for j in 0..k {
+            let poly = b.get_poly(i, j);
+            let neg = negacyclic_matrix(poly, q); // d*d row-major
+
+            for bi in 0..d {
+                for bj in 0..d {
+                    let out_row = i * d + bi;
+                    let out_col = j * d + bj;
+                    let out_idx = out_row * (k * d) + out_col;
+
+                    let neg_idx = bi * d + bj;
+                    out[out_idx] = neg[neg_idx];
+                }
+            }
+        }
+    }
+
+    out
+}
+
 #[cfg(target_feature = "avx2")]
 pub fn is_avx() -> bool {
     true
@@ -317,4 +368,66 @@ mod test {
             assert_eq!(prod[i] % params.modulus, c[i] % params.modulus, "i = {}", i);
         }
     }
+
+    #[test]
+fn test_negacyclic_mul_general_dims() {
+    let params = test_params();
+
+    // A: 3×2 polys, B: 2×3 polys
+    let pol_a = PolyMatrixRaw::random(&params, 5, 2);
+    let pol_b = PolyMatrixRaw::random(&params, 2, 3);
+
+    let m = pol_a.rows;        // 3
+    let n = pol_a.cols;        // 2
+    let k = pol_b.cols;        // 3
+    let d = params.poly_len;   // poly length
+    println!("d: {}", d);
+
+    // 1) A_big 만들기 (raw row concat)
+    let a_big = poly_matrix_to_row_concat(&pol_a);
+    assert_eq!(a_big.len(), m * n * d);
+
+    // 2) B_big 만들기 (negacyclic block)
+    let b_big = poly_matrix_to_negacyclic_block(&pol_b);
+    assert_eq!(b_big.len(), (n * d) * (k * d));
+
+    // 3) raw matmul
+    // prod_big shape: m × (k*d)
+    let prod_big = multiply_matrices_raw_not_transposed(
+        &params,
+        &a_big,
+        m,
+        n * d,
+        &b_big,
+        n * d,
+        k * d,
+    );
+    assert_eq!(prod_big.len(), m * k * d);
+
+    // 4) NTT 기반 정답
+    let pol_c = (&pol_a.ntt() * &pol_b.ntt()).raw();
+    assert_eq!(pol_c.rows, m);
+    assert_eq!(pol_c.cols, k);
+
+    // 5) coeff-wise 비교 (1×1 테스트랑 똑같은 방식)
+    for i in 0..m {
+        for j in 0..k {
+            let c_poly = pol_c.get_poly(i, j);
+
+            // prod_big에서 (i,j) poly가 차지하는 d개 구간
+            let base = i * (k * d) + j * d;
+            let prod_slice = &prod_big[base..base + d];
+
+            for t in 0..d {
+                assert_eq!(
+                    prod_slice[t],
+                    c_poly[t],
+                    "Mismatch at (i={}, j={}, t={})",
+                    i, j, t
+                );
+            }
+        }
+    }
+}
+
 }

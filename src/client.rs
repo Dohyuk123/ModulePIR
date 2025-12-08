@@ -988,16 +988,25 @@ mod test {
 
     #[test]
     fn test_poly() { // multiply : matrix multiplication
-	let params = params_for_scenario(1<<30, 1);
+	let mut params = params_for_scenario(1<<30, 1);
+	params.poly_len = 32;
+	params.poly_len_log2 = 5;
 	let mut client = Client::init(&params);
 	let mut poly_1 = PolyMatrixRaw::zero(&params, 1, 1);
-	poly_1.data[0] = 6;
-	poly_1.data[1] = 1;
+
+	let mut rng = rand::thread_rng();
+	println!("{}", params.modulus);
+
+	//poly_1.data[0] = rng.gen_range(params.modulus / 2..params.modulus);
+	poly_1.data[0] = 124213251236121234 % params.modulus;	
+	println!("{}", poly_1.data[0]);
+	println!("{}", (poly_1.data[0] * 531256123) % params.modulus);
+	poly_1.data[1] = 98678;
 	//poly_1.data[2048] = 1;
 	//poly_1.data[2049] = 2;
 	let mut poly_2 = PolyMatrixRaw::zero(&params, 1, 1);
-	poly_2.data[0] = 3;
-	poly_2.data[1] = 4;
+	poly_2.data[0] = 531256123;
+	poly_2.data[1] = 214890;
 	//poly_2.data[2048] = 4;
 	//poly_2.data[2049] = 3;
 	//poly_2.data[4096] = 5;
@@ -1240,5 +1249,92 @@ mod test {
 	println!("finished");
 
 	//for i in
+    }
+
+    #[test]
+    fn test_nega() {
+	let mut params = params_for_scenario(1<<30, 1);
+	params.poly_len = 8;
+	params.poly_len_log2 = 3;
+	let mut mat = PolyMatrixRaw::zero(&params, 2, 4);
+	mat.data[0] = 1;
+	mat.data[1] = 1;
+	mat.data[8] = 2;
+	mat.data[9] = 1;
+	mat.data[16] = 3;
+	mat.data[17] = 2;
+	mat.data[24] = 4;
+	mat.data[25] = 3;
+	mat.data[32] = 5;
+	mat.data[33] = 4;
+	mat.data[40] = 3;
+	mat.data[41] = 1;
+	mat.data[48] = 6;
+	mat.data[49] = 3;
+	mat.data[56] = 2;
+	mat.data[57] = 7;
+
+	let mut vec = PolyMatrixRaw::zero(&params, 1, 2);
+	vec.data[0] = 1;
+	vec.data[1] = 1;
+	vec.data[8] = 2;
+	vec.data[9] = 1;
+	
+	println!("{:?}", mat.as_slice());
+
+	let poly_len = params.poly_len;
+
+	println!("{}", poly_len);
+
+	let mat_slice = mat.as_slice();
+	//println!("mat slice: {:?}, {}", mat_slice, mat_slice.len());
+	let row = mat.get_rows();
+	let col = mat.get_cols();
+
+	let start = Instant::now();
+	let mut nega: Vec<u64> = vec![0; row*col*poly_len*poly_len];
+
+	for k in 0..row {
+	    for l in 0..col {
+		for i in 0..poly_len {
+		    for j in 0..(i+1) {
+			nega[(k*poly_len+i)*poly_len*col + l*poly_len + j] = mat.data[col*poly_len*k + l*poly_len + i - j];
+		    }
+		    for j in (i+1)..poly_len {
+			nega[(k*poly_len+i)*poly_len*col + l*poly_len + j] = params.modulus - mat.data[col*poly_len*k + l*poly_len + poly_len - j + i];
+			//println!("{}", col*poly_len*k + l*poly_len + poly_len - j + i)
+		    }
+		}
+	    }
+	}
+
+	const a_rows: usize = 1;	
+
+	let a_cols = 16;
+	let b_rows = a_cols;
+	let b_cols = 32;
+
+//	let mut vec = PolyMatrixRaw::zero(&params, 1, 2);
+
+	let mut b = AlignedMemory64::new(16 * 32);
+	let mut c = AlignedMemory64::new(a_rows * b_cols);
+
+	for i in 0..b.len(){
+	    b[i] = nega[i];
+	}
+
+	let b_u16_slc = unsafe { std::slice::from_raw_parts(b.as_ptr() as *const u16, b.len() * 4) };
+
+	fast_batched_dot_product_avx512::<a_rows, _>(
+                &params,
+                c.as_mut_slice(),
+                vec.as_slice(),
+                a_cols,
+                b_u16_slc,
+                b_rows,
+                b_cols,
+        );
+
+	println!("{:?}", c.as_slice());
     }
 }

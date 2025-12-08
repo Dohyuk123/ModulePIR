@@ -196,7 +196,7 @@ impl YPIRSchemeParams {
         let (delta_simple, _) = self.delta_simple();
         let (delta_double, _) = self.delta_double();
 	println!("delta simple, delta double: {} {}", delta_simple, delta_double);
-	delta_simple + delta_double
+	delta_double + delta_double
 
     }
 
@@ -280,8 +280,8 @@ mod tests {
 	let mut params = params_for_scenario(1<<30, 8);
 	params.db_dim_1 = 1<<18;
 	params.db_dim_2 = 1<<18;
-	params.pt_modulus = 1<<8;
-	params.modulus = 1<<46;
+	params.pt_modulus = 1<<15;
+	//params.modulus = 1<<46;
 
 	let mut ysp_tmp = YPIRSchemeParams::from_params(&params, &lwe_params);
 
