@@ -905,7 +905,7 @@ pub fn precompute_pack_mlwe_to_rlwe<'a>(
 
     let mut res = Vec::new();
 
-    for cur_ell in (mlwe_byte_log2+1)..=ell {
+    for cur_ell in (mlwe_byte_log2+1)..=ell { //5, 6, 7, 8, 9, 10, 11
 	//println!("hi");
         let num_in = 1 << (ell - cur_ell + 1);
         let num_out = num_in >> 1;
@@ -991,7 +991,10 @@ pub fn precompute_pack_mlwe_to_rlwe<'a>(
 
                 res.push(condense_matrix(params, cur_ginv_ct_ntt));
 
-                let pub_param = &fake_pub_params[params.poly_len_log2 - 1 - (cur_ell - 1)];
+		//println!("index : {}", params.poly_len_log2 - 1 - (cur_ell - 1));
+
+                let pub_param = &fake_pub_params[params.poly_len_log2 - 1 - (cur_ell - 1)]; // 4, 3, 2, 1
+
                 // let ginv_ct_ntt = ginv_ct.ntt();
                 // let w_times_ginv_ct = pub_param * &ginv_ct_ntt;
                 w_times_ginv_ct.as_mut_slice().fill(0);

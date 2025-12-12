@@ -432,8 +432,8 @@ fn test_negacyclic_mul_general_dims() {
     params.poly_len_log2 = 7;
 
     // A: 3×2 polys, B: 2×3 polys
-    let pol_a = PolyMatrixRaw::random(&params, 1, 4096);
-    let pol_b = PolyMatrixRaw::random(&params, 4096, 1);
+    let pol_a = PolyMatrixRaw::random(&params, 16, 4096);
+    let pol_b = PolyMatrixRaw::random(&params, 4096, 16);
 
     let m = pol_a.rows;        // 3
     let n = pol_a.cols;        // 2
@@ -451,6 +451,9 @@ fn test_negacyclic_mul_general_dims() {
 
     // 3) raw matmul
     // prod_big shape: m × (k*d)
+
+    let start = Instant::now();
+
     let prod_big = multiply_matrices_raw_not_transposed_chunked(
         &params,
         &a_big,
@@ -460,13 +463,23 @@ fn test_negacyclic_mul_general_dims() {
         n * d,
         k * d,
     );
+
+    let end = Instant::now();
+
+    println!("schoolbook time: {:?}", end - start);
+
     assert_eq!(prod_big.len(), m * k * d);
 
     // 4) NTT 기반 정답
 
-    
+    let start_n = Instant::now();
 
     let pol_c = (&pol_a.ntt() * &pol_b.ntt()).raw();
+    
+    let end_n = Instant::now();
+
+    println!("ntt time: {:?}", end_n - start_n);
+
     assert_eq!(pol_c.rows, m);
     assert_eq!(pol_c.cols, k);
 

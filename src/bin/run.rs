@@ -23,9 +23,9 @@ fn main() {
 	panic!("Items must be smaller than 2048 bytes!");
     }
 
-    if item_size_bytes <= 8 {
-	panic!("Items must be larger than 8 bytes!");
-    }
+    //if item_size_bytes <= 8 {
+//	panic!("Items must be larger than 8 bytes!");
+//    }
 
     let mlwe_bit = 32 - item_size_bytes.leading_zeros() - 1;
 

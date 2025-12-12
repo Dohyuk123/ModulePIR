@@ -927,7 +927,7 @@ pub fn run_module_pir_on_params (mlwe_bit: u32){//params: &Params, mlwe_params: 
     let pack_pub_params = raw_generate_expansion_params( // mlwe to rlwe compression key
         &params,
         client.get_sk_reg(),
-        mlwe_params.poly_len_log2,
+        params.poly_len_log2 - mlwe_params.poly_len_log2,
         params.t_exp_left,
         &mut ChaCha20Rng::from_entropy(),
         &mut ChaCha20Rng::from_seed(pack_seed),

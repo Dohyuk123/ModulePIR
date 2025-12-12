@@ -568,7 +568,7 @@ pub fn multiply(res: &mut PolyMatrixNTT, a: &PolyMatrixNTT, b: &PolyMatrixNTT) {
     assert_eq!(res.cols, b.cols);
     assert_eq!(a.cols, b.rows);
 
-    const CHUNK: usize = 256; //256;
+    const CHUNK: usize = 512; //256;
 
     let params = res.params;
     for i in 0..a.rows {
