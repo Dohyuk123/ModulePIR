@@ -877,14 +877,14 @@ pub fn run_module_pir_on_params_no_fn (mlwe_bit: u32) {
 	println!("total time: {:?}", end - start);
 }
 
-pub fn run_module_pir_on_params (mlwe_bit: u32){//params: &Params, mlwe_params: &Params, simple_params: &Params) {
+pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize){//params: &Params, mlwe_params: &Params, simple_params: &Params) {
 
     let mut params = params_for_scenario(1<<30, 1);
     //params.pt_modulus = 1<<15;
     
     //256MB: 3, 2 //1GB: 4, 3 //2GB: 4, 4 //8GB: 5, 5 // 32GB: 6, 6
-    params.db_dim_1 = 6;
-    params.db_dim_2 = 6;
+    params.db_dim_1 = db_dim_1;
+    params.db_dim_2 = db_dim_2;
 
     let mut mlwe_params = params.clone();
     mlwe_params.poly_len_log2 = mlwe_bit as usize;
