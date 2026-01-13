@@ -96,6 +96,6 @@ cargo run --release -- -d 5 -e 5
 # 32 GB database
 cargo run --release -- -d 6 -e 6
 
-# Custom polynomial degree (256-byte records)
+# Custom polynomial degree (480-byte records)
 cargo run --release -- -p 256 -d 4 -e 3
 ```

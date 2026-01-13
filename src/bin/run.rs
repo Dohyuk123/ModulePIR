@@ -1,4 +1,4 @@
-use ypir::scheme::{run_module_pir_on_params, run_module_pir_on_params_no_fn, test_module_pir_on_params_no_fn};
+use ypir::scheme::{run_module_pir_on_params};
 use ypir::params::params_for_scenario;
 use clap::Parser;
 
