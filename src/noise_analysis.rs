@@ -506,9 +506,15 @@ mod tests {
     fn test_parameter_variations() {
         // Test with different record sizes (varying n and k)
         let test_cases = vec![
-            (256.0, 8.0, "256B records"),   // n=256, k=8, d=2048
-            (512.0, 4.0, "512B records"),   // n=512, k=4, d=2048
-            (1024.0, 2.0, "1KB records"),   // n=1024, k=2, d=2048
+            (8.0, 256.0, "15B recored"),
+            (16.0, 128.0, "30B recored"),
+            (32.0, 64.0, "60B recored"),
+            (64.0, 32.0, "120B recored"),
+            (128.0, 16.0, "240B recored"),
+            (256.0, 8.0, "480B records"),   // n=256, k=8, d=2048
+            (512.0, 4.0, "960B records"),   // n=512, k=4, d=2048
+            (1024.0, 2.0, "1920B records"), 
+            //(1.0, 2048.0, "4KB records"),// n=1024, k=2, d=2048
         ];
         
         for (n, k, desc) in test_cases {
