@@ -107,6 +107,170 @@ pub fn simplepir_correctness(_lwe_n: f64, lwe_q: f64, lwe_s: f64, lwe_p: f64, up
     log2_err_prob
 }
 
+pub struct ModulePIRParams {
+    /// Ciphertext modulus (≈ 2^56)
+    pub q: f64,
+    /// Gaussian error parameter (6.4 * sqrt(2π))
+    pub sigma: f64,
+    /// Modulus switching targets: q̃₁ = 2^28, q̃₂ = 2^20
+    pub q_tilde_1: f64,
+    pub q_tilde_2: f64,
+    /// RLWE ring degree d = 2^11
+    pub d: f64,
+    /// MLWE ring degree n (d = kn)
+    pub n: f64,
+    /// MLWE rank k
+    pub k: f64,
+    /// Gadget base for key switching (z = 2^19)
+    pub z: f64,
+    /// Plaintext modulus
+    pub p: f64,
+    /// Database dimensions: ℓ₁ = m₁·d rows, ℓ₂ = m₂·n columns
+    pub l1: f64,
+    pub l2: f64,
+}
+
+impl Default for ModulePIRParams {
+    fn default() -> Self {
+        Self {
+            q: 2.0f64.powi(56),
+            sigma: 6.4 * (2.0 * PI).sqrt(),
+            q_tilde_1: 2.0f64.powi(28),
+            q_tilde_2: 2.0f64.powi(20),
+            d: 2.0f64.powi(11),  // 2048
+            n: 2.0,            // example: n = 256
+            k: 1024.0,              // d = kn = 2048
+            z: 2.0f64.powi(19),
+            p: 2.0f64.powi(15),
+            l1: 2.0f64.powi(18), // max 128GB
+            l2: 2.0f64.powi(18),
+        }
+    }
+}
+
+impl ModulePIRParams {
+    /// t = ⌈log_z(q)⌉
+    pub fn t(&self) -> f64 {
+        (self.q.log2() / self.z.log2()).ceil()
+    }
+
+    /// ρ = ⌈t(k+1)/k⌉
+    pub fn rho(&self) -> f64 {
+        let t = self.t();
+        (t * (self.k + 1.0) / self.k).ceil()
+    }
+
+    /// τ_LM: Error threshold for LWE-to-MLWE packing
+    /// τ_LM = q̃₂/(2p) - (q̃₂ mod p) - ½(2 + (q̃₂ mod p) + (q̃₂/q)(q mod p))
+    pub fn tau_lm(&self) -> f64 {
+        tau_common(self.q, self.q_tilde_2, self.p)
+    }
+
+    /// τ_MR: Error threshold for MLWE-to-RLWE packing (same formula)
+    pub fn tau_mr(&self) -> f64 {
+        tau_common(self.q, self.q_tilde_2, self.p)
+    }
+
+    /// σ²_scan for SimplePIR: √ℓ₁ · (p/2) · σ
+    fn sigma_scan_1(&self) -> f64 {
+        self.l1.sqrt() * (self.p / 2.0) * self.sigma
+    }
+
+    /// σ²_pack,LM: LWE-to-MLWE packing error variance
+    /// σ²_pack,LM ≤ ((n² - 1)/3) · (ktn·z²·σ²/4)
+    fn sigma_pack_lm_sq(&self) -> f64 {
+        let t = self.t();
+        ((self.n.powi(2) - 1.0) / 3.0) * (self.k * t * self.n * self.z.powi(2) * self.sigma.powi(2) / 4.0)
+    }
+
+    /// σ²_LM: Total variance for LWE-to-MLWE stage
+    /// σ²_LM ≤ (q̃₂/q̃₁)² · (nk·σ²/4) + (q̃₂/q)² · (σ²/4) · (ℓ₁·p² + ((n²-1)·ktn·z²)/3)
+    pub fn sigma_lm_sq(&self) -> f64 {
+        let t = self.t();
+        
+        // Term 1: modulus switching rounding error
+        let term1 = (self.q_tilde_2 / self.q_tilde_1).powi(2) 
+            * (self.n * self.k * self.sigma.powi(2) / 4.0);
+        
+        // Term 2: scan error + packing error
+        let scan_sq = self.l1 * self.p.powi(2);
+        let pack_term = (self.n.powi(2) - 1.0) * self.k * t * self.n * self.z.powi(2) / 3.0;
+        let term2 = (self.q_tilde_2 / self.q).powi(2) 
+            * (self.sigma.powi(2) / 4.0) 
+            * (scan_sq + pack_term);
+        
+        term1 + term2
+    }
+
+    /// σ²_scan,2 for DoublePIR: √m₂ · (p/2) · σ where m₂ = ℓ₂/n
+    fn sigma_scan_2(&self) -> f64 {
+        let m2 = self.l2 / self.n;
+        m2.sqrt() * (self.p / 2.0) * self.sigma
+    }
+
+    /// σ²_pack,MR: MLWE-to-RLWE packing error variance
+    /// σ²_pack,MR ≤ ((k² - 1)/3) · (td·z²·σ²/4)
+    fn sigma_pack_mr_sq(&self) -> f64 {
+        let t = self.t();
+        ((self.k.powi(2) - 1.0) / 3.0) * (t * self.d * self.z.powi(2) * self.sigma.powi(2) / 4.0)
+    }
+
+    /// σ²_MR: Total variance for MLWE-to-RLWE stage
+    /// σ²_MR ≤ (q̃₂/q̃₁)² · (d·σ²/4) + (q̃₂/q)² · (σ²/4) · (ℓ₂·p² + ((k²-1)·td·z²)/3)
+    pub fn sigma_mr_sq(&self) -> f64 {
+        let t = self.t();
+        
+        // Term 1: modulus switching rounding error (d = kn terms)
+        let term1 = (self.q_tilde_2 / self.q_tilde_1).powi(2) 
+            * (self.d * self.sigma.powi(2) / 4.0);
+        
+        // Term 2: scan error + packing error
+        let scan_sq = self.l2 * self.p.powi(2);
+        let pack_term = (self.k.powi(2) - 1.0) * t * self.d * self.z.powi(2) / 3.0;
+        let term2 = (self.q_tilde_2 / self.q).powi(2) 
+            * (self.sigma.powi(2) / 4.0) 
+            * (scan_sq + pack_term);
+        
+        term1 + term2
+    }
+
+    /// δ_LM: Correctness error for LWE-to-MLWE packing
+    /// δ_LM = 2n · exp(-π·τ²_LM / σ²_LM)
+    pub fn delta_lm(&self) -> f64 {
+        let tau = self.tau_lm();
+        let sigma_sq = self.sigma_lm_sq();
+        2.0 * self.n * (-PI * tau.powi(2) / sigma_sq).exp()
+    }
+
+    /// δ_MR: Correctness error for MLWE-to-RLWE packing
+    /// δ_MR = 2dρ · exp(-π·τ²_MR / σ²_MR)
+    pub fn delta_mr(&self) -> f64 {
+        let tau = self.tau_mr();
+        let sigma_sq = self.sigma_mr_sq();
+        let rho = self.rho();
+        2.0 * self.d * rho * (-PI * tau.powi(2) / sigma_sq).exp()
+    }
+
+    /// Total correctness error: δ = δ_LM + δ_MR
+    pub fn delta(&self) -> f64 {
+        self.delta_lm() + self.delta_mr()
+    }
+
+    /// Log2 of individual error components (for debugging)
+    pub fn log2_deltas(&self) -> (f64, f64, f64) {
+        (self.delta_lm().log2(), self.delta_mr().log2(), self.delta().log2())
+    }
+}
+
+/// Common tau formula used in both stages:
+/// τ = q̃₂/(2p) - (q̃₂ mod p) - ½(2 + (q̃₂ mod p) + (q̃₂/q)(q mod p))
+fn tau_common(q: f64, q_tilde: f64, p: f64) -> f64 {
+    let term1 = q_tilde / (2.0 * p);
+    let term2 = -(q_tilde % p);
+    let term3 = -0.5 * (2.0 + (q_tilde % p) + (q_tilde / q) * (q % p));
+    term1 + term2 + term3
+}
+
 pub struct YPIRSchemeParams {
     pub l1: f64,
     pub d1: f64,
@@ -307,6 +471,57 @@ mod tests {
         println!("total_log2_delta: {}", total_log2_delta);
 
         assert!(total_log2_delta < -40.);
+    }
+    
+        #[test]
+    fn test_modulepir_correctness() {
+        let params = ModulePIRParams::default();
+        
+        println!("=== ModulePIR Parameters ===");
+        println!("q = 2^{:.1}", params.q.log2());
+        println!("σ = {:.2}", params.sigma);
+        println!("q̃₁ = 2^{:.0}, q̃₂ = 2^{:.0}", params.q_tilde_1.log2(), params.q_tilde_2.log2());
+        println!("d = {}, n = {}, k = {}", params.d, params.n, params.k);
+        println!("t = {}, ρ = {}", params.t(), params.rho());
+        println!("ℓ₁ = 2^{:.0}, ℓ₂ = 2^{:.0}", params.l1.log2(), params.l2.log2());
+        
+        println!("\n=== Error Analysis ===");
+        println!("τ_LM = {:.2e}", params.tau_lm());
+        println!("τ_MR = {:.2e}", params.tau_mr());
+        println!("σ²_LM = 2^{:.1}", params.sigma_lm_sq().log2());
+        println!("σ²_MR = 2^{:.1}", params.sigma_mr_sq().log2());
+        
+        let (log2_delta_lm, log2_delta_mr, log2_delta_total) = params.log2_deltas();
+        println!("\n=== Correctness Error ===");
+        println!("log₂(δ_LM) = {:.1}", log2_delta_lm);
+        println!("log₂(δ_MR) = {:.1}", log2_delta_mr);
+        println!("log₂(δ_total) = {:.1}", log2_delta_total);
+        
+        // Verify correctness error ≤ 2^{-40}
+        assert!(log2_delta_total < -40.0, 
+            "Correctness error too high: 2^{:.1} > 2^-40", log2_delta_total);
+    }
+
+    #[test]
+    fn test_parameter_variations() {
+        // Test with different record sizes (varying n and k)
+        let test_cases = vec![
+            (256.0, 8.0, "256B records"),   // n=256, k=8, d=2048
+            (512.0, 4.0, "512B records"),   // n=512, k=4, d=2048
+            (1024.0, 2.0, "1KB records"),   // n=1024, k=2, d=2048
+        ];
+        
+        for (n, k, desc) in test_cases {
+            let params = ModulePIRParams {
+                n,
+                k,
+                ..Default::default()
+            };
+            
+            let (_, _, log2_delta) = params.log2_deltas();
+            println!("{}: log₂(δ) = {:.1}", desc, log2_delta);
+            assert!(log2_delta < -40.0);
+        }
     }
 
     #[test]
