@@ -73,11 +73,10 @@ impl Sample for u16 {
     }
 }
 
-pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize){//params: &Params, mlwe_params: &Params, simple_params: &Params) {
+pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize, pt_mod: usize){//params: &Params, mlwe_params: &Params, simple_params: &Params) {
 
     let mut params = params_for_scenario(1<<30, 1);
-    println!("{}", params.modulus);
-    //params.pt_modulus = 1<<15;
+    params.pt_modulus = 1<<pt_mod;
     
     //256MB: 3, 2 //1GB: 4, 3 //2GB: 4, 4 //8GB: 5, 5 // 32GB: 6, 6
     params.db_dim_1 = db_dim_1;
@@ -87,7 +86,7 @@ pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize
     mlwe_params.poly_len_log2 = mlwe_bit as usize;
     mlwe_params.poly_len = 1<<mlwe_params.poly_len_log2;
 
-    println!("mlwe_dimension : {}", mlwe_params.poly_len);
+    //println!("mlwe_dimension : {}", mlwe_params.poly_len);
 
     let mut simple_params = mlwe_params.clone();
     simple_params.modulus = 1<<26;

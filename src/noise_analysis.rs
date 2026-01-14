@@ -152,13 +152,13 @@ impl Default for ModulePIRParams {
 impl ModulePIRParams {
     /// t = ⌈log_z(q)⌉
     pub fn t(&self) -> f64 {
-        (self.q.log2() / self.z.log2()).ceil()
+        (self.q_tilde_1.log2() / self.p.log2()).ceil()
     }
 
     /// ρ = ⌈kappa(k+1)/k⌉
     pub fn rho(&self) -> f64 {
-        let kappa = 1.0;
-        (kappa * (self.k + 1.0) / self.k).ceil()
+        let t= self.t();
+        (t * (self.k + 1.0) / self.k).ceil()
     }
 
     /// τ_LM: Error threshold for LWE-to-MLWE packing
@@ -249,7 +249,7 @@ impl ModulePIRParams {
         let tau = self.tau_mr();
         let sigma_sq = self.sigma_mr_sq();
         let rho = self.rho();
-        2.0 * self.d * (-PI * tau.powi(2) / sigma_sq).exp()
+        2.0 * self.d * rho * (-PI * tau.powi(2) / sigma_sq).exp()
     }
 
     /// Total correctness error: δ = δ_LM + δ_MR
@@ -503,13 +503,10 @@ mod tests {
             "Correctness error too high: 2^{:.1} > 2^-40", log2_delta_total);
     }
 
-    #[test]
+#[test]
     fn test_parameter_variations() {
         // Test with different record sizes (varying n and k)
         let test_cases = vec![
-            (1.0, 2048.0, "15bit records"),
-            (2.0, 1024.0, "3.75B records"),
-            (4.0, 512.0, "7.5B records"),
             (8.0, 256.0, "15B records"),
             (16.0, 128.0, "30B records"),
             (32.0, 64.0, "60B records"),
@@ -517,20 +514,46 @@ mod tests {
             (128.0, 16.0, "240B records"),
             (256.0, 8.0, "480B records"),   // n=256, k=8, d=2048
             (512.0, 4.0, "960B records"),   // n=512, k=4, d=2048
-            (1024.0, 2.0, "1920B records"), 
-            //(1.0, 2048.0, "4KB records"),// n=1024, k=2, d=2048
+            (1024.0, 2.0, "1920B records"), // n=1024, k=2, d=2048
         ];
         
-        for (n, k, desc) in test_cases {
+        // p = 2^15
+        println!("\n=== p=2^15 ===");
+        for (n, k, desc) in &test_cases {
             let params = ModulePIRParams {
-                n,
-                k,
+                n: *n,
+                k: *k,
+                p: 2.0f64.powi(15),
                 ..Default::default()
             };
             
             let (_, _, log2_delta) = params.log2_deltas();
             println!("{}: log₂(δ) = {:.1}", desc, log2_delta);
-            //assert!(log2_delta < -40.0);
+        }
+        
+        // p = 2^16
+        let test_cases_p16 = vec![
+            (8.0, 256.0, "16B records"),
+            (16.0, 128.0, "32B records"),
+            (32.0, 64.0, "64B records"),
+            (64.0, 32.0, "128B records"),
+            (128.0, 16.0, "256B records"),
+            (256.0, 8.0, "512B records"),
+            (512.0, 4.0, "1024B records"),
+            (1024.0, 2.0, "2048B records"),
+        ];
+        
+        println!("\n=== p=2^16 ===");
+        for (n, k, desc) in &test_cases_p16 {
+            let params = ModulePIRParams {
+                n: *n,
+                k: *k,
+                p: 2.0f64.powi(16),
+                ..Default::default()
+            };
+            
+            let (_, _, log2_delta) = params.log2_deltas();
+            println!("{}: log₂(δ) = {:.1}", desc, log2_delta);
         }
     }
 

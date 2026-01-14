@@ -51,13 +51,11 @@ fn main() {
     
     let mlwe_bit = 32 - item_size_bytes.leading_zeros() - 1;
     
-    println!("mlwe bit : {}", mlwe_bit);
     println!("polynomial_degree: {}", polynomial_degree);
-    println!("db_dim_1: {}, db_dim_2: {}", db_dim_1, db_dim_2);
     
     println!("db size is {}B", 15u64 * 2048 * 2048 * (1u64 << db_dim_1) * (1u64 << db_dim_2) / 8);
-    println!("record size is {}B", 15 * (1<<mlwe_bit) / 8);
-    
-    
-    run_module_pir_on_params(mlwe_bit, db_dim_1, db_dim_2);
+    let pt_mod = 15;
+    println!("record size is {}B", pt_mod * (1<<mlwe_bit) / 8);
+        
+    run_module_pir_on_params(mlwe_bit, db_dim_1, db_dim_2, pt_mod);
 }
