@@ -141,7 +141,7 @@ impl Default for ModulePIRParams {
             n: 2.0,            // example: n = 256
             k: 1024.0,              // d = kn = 2048
             z: 2.0f64.powi(19),
-            p: 2.0f64.powi(16),
+            p: 2.0f64.powi(16), // 2^15 or 2^16
             l1: 2.0f64.powi(18), // max 128GB
             l2: 2.0f64.powi(18),
             
@@ -157,7 +157,7 @@ impl ModulePIRParams {
 
     /// ρ = ⌈kappa(k+1)/k⌉
     pub fn rho(&self) -> f64 {
-        let kappa = 2.0;
+        let kappa = 1.0;
         (kappa * (self.k + 1.0) / self.k).ceil()
     }
 
@@ -249,7 +249,7 @@ impl ModulePIRParams {
         let tau = self.tau_mr();
         let sigma_sq = self.sigma_mr_sq();
         let rho = self.rho();
-        2.0 * self.d * rho * (-PI * tau.powi(2) / sigma_sq).exp()
+        2.0 * self.d * (-PI * tau.powi(2) / sigma_sq).exp()
     }
 
     /// Total correctness error: δ = δ_LM + δ_MR
