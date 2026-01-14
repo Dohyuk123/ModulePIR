@@ -141,7 +141,7 @@ impl Default for ModulePIRParams {
             n: 2.0,            // example: n = 256
             k: 1024.0,              // d = kn = 2048
             z: 2.0f64.powi(19),
-            p: 2.0f64.powi(16), // 2^15 or 2^16
+            p: 2.0f64.powi(15), // 2^15 or 2^16
             l1: 2.0f64.powi(18), // max 128GB
             l2: 2.0f64.powi(18),
             

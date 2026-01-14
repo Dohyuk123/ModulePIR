@@ -70,7 +70,6 @@ fn main() {
     let mlwe_bit = 32 - item_size_bytes.leading_zeros() - 1;
     
     println!("polynomial_degree: {}", polynomial_degree);
-    println!("pt_mod: {}", pt_mod);
     println!("db size is {}B", 15u64 * 2048 * 2048 * (1u64 << db_dim_1) * (1u64 << db_dim_2) / 8);
     println!("record size is {}B", pt_mod * (1 << mlwe_bit) / 8);
         
