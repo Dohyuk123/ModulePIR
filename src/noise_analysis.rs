@@ -144,6 +144,7 @@ impl Default for ModulePIRParams {
             p: 2.0f64.powi(16),
             l1: 2.0f64.powi(18), // max 128GB
             l2: 2.0f64.powi(18),
+            
         }
     }
 }
@@ -154,10 +155,10 @@ impl ModulePIRParams {
         (self.q.log2() / self.z.log2()).ceil()
     }
 
-    /// ρ = ⌈t(k+1)/k⌉
+    /// ρ = ⌈kappa(k+1)/k⌉
     pub fn rho(&self) -> f64 {
-        let t = self.t();
-        (t * (self.k + 1.0) / self.k).ceil()
+        let kappa = 2.0;
+        (kappa * (self.k + 1.0) / self.k).ceil()
     }
 
     /// τ_LM: Error threshold for LWE-to-MLWE packing
