@@ -11,7 +11,7 @@ use crate::modulus_switch::ModulusSwitch;
 
 use super::util::*;
 use super::convolution::negacyclic_matrix_u32;
-use super::{lwe::*, noise_analysis::measure_noise_width_squared, scheme::*, util::*, server::*};
+use super::{lwe::*, noise_analysis::measure_noise_width_squared, scheme::*, server::*};
 
 fn poly_mul_mod(a: &[i64], b: &[i64], modulus: i64) -> Vec<i64> {
     let n = a.len();
