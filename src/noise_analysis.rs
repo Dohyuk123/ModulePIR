@@ -125,6 +125,7 @@ pub struct ModulePIRParams {
     pub z: f64,
     /// Plaintext modulus
     pub p: f64,
+    pub p_tilde: f64,
     /// Database dimensions: ℓ₁ = m₁·d rows, ℓ₂ = m₂·n columns
     pub l1: f64,
     pub l2: f64,
@@ -142,6 +143,7 @@ impl Default for ModulePIRParams {
             k: 1024.0,              // d = kn = 2048
             z: 2.0f64.powi(19),
             p: 2.0f64.powi(15), // 2^15 or 2^16
+            p_tilde: 2.0f64.powi(15),
             l1: 2.0f64.powi(18), // max 128GB
             l2: 2.0f64.powi(18),
             
@@ -169,13 +171,13 @@ impl ModulePIRParams {
 
     /// τ_MR: Error threshold for MLWE-to-RLWE packing (same formula)
     pub fn tau_mr(&self) -> f64 {
-        tau_common(self.q, self.q_tilde_2, self.p)
+        tau_common(self.q, self.q_tilde_2, self.p_tilde)
     }
 
     /// σ²_scan for SimplePIR: √ℓ₁ · (p/2) · σ
-    fn sigma_scan_1(&self) -> f64 {
-        self.l1.sqrt() * (self.p / 2.0) * self.sigma
-    }
+    //fn sigma_scan_1(&self) -> f64 {
+    //    self.l1.sqrt() * (self.p / 2.0) * self.sigma
+    //}
 
     /// σ²_pack,LM: LWE-to-MLWE packing error variance
     /// σ²_pack,LM ≤ ((n² - 1)/3) · (ktn·z²·σ²/4)
@@ -204,10 +206,10 @@ impl ModulePIRParams {
     }
 
     /// σ²_scan,2 for DoublePIR: √m₂ · (p/2) · σ where m₂ = ℓ₂/n
-    fn sigma_scan_2(&self) -> f64 {
-        let m2 = self.l2 / self.n;
-        m2.sqrt() * (self.p / 2.0) * self.sigma
-    }
+    //fn sigma_scan_2(&self) -> f64 {
+    //    let m2 = self.l2 / self.n;
+    //    m2.sqrt() * (self.p / 2.0) * self.sigma
+    //}
 
     /// σ²_pack,MR: MLWE-to-RLWE packing error variance
     /// σ²_pack,MR ≤ ((k² - 1)/3) · (td·z²·σ²/4)
@@ -226,7 +228,7 @@ impl ModulePIRParams {
             * (self.d * self.sigma.powi(2) / 4.0);
         
         // Term 2: scan error + packing error
-        let scan_sq = self.l2 * self.p.powi(2);
+        let scan_sq = self.l2 * self.p_tilde.powi(2);
         let pack_term = (self.k.powi(2) - 1.0) * t * self.d * self.z.powi(2) / 3.0;
         let term2 = (self.q_tilde_2 / self.q).powi(2) 
             * (self.sigma.powi(2) / 4.0) 
@@ -512,9 +514,9 @@ mod tests {
             (32.0, 64.0, "60B records"),
             (64.0, 32.0, "120B records"),
             (128.0, 16.0, "240B records"),
-            (256.0, 8.0, "480B records"),   // n=256, k=8, d=2048
-            (512.0, 4.0, "960B records"),   // n=512, k=4, d=2048
-            (1024.0, 2.0, "1920B records"), // n=1024, k=2, d=2048
+            (256.0, 8.0, "480B records"),   
+            (512.0, 4.0, "960B records"),   
+            (1024.0, 2.0, "1920B records"), 
         ];
         
         // p = 2^15
@@ -527,7 +529,7 @@ mod tests {
                 ..Default::default()
             };
             
-            let (_, _, log2_delta) = params.log2_deltas();
+            let (lm, mr, log2_delta) = params.log2_deltas();
             println!("{}: log₂(δ) = {:.1}", desc, log2_delta);
         }
         
@@ -552,7 +554,7 @@ mod tests {
                 ..Default::default()
             };
             
-            let (_, _, log2_delta) = params.log2_deltas();
+            let (lm, mr, log2_delta) = params.log2_deltas();
             println!("{}: log₂(δ) = {:.1}", desc, log2_delta);
         }
     }

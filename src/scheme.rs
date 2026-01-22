@@ -73,7 +73,7 @@ impl Sample for u16 {
     }
 }
 
-pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize, pt_mod: usize){//params: &Params, mlwe_params: &Params, simple_params: &Params) {
+pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize, pt_mod: usize){
 
     let mut params = params_for_scenario(1<<30, 1);
     params.pt_modulus = 1<<pt_mod;

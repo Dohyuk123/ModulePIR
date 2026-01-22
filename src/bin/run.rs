@@ -64,7 +64,7 @@ fn main() {
     let item_size_bytes = polynomial_degree as u32;
     
     if item_size_bytes > 2048 {
-        panic!("Items must be smaller than 2048 bytes!");
+        panic!("polynomial degree must be smaller than 2048 bytes!");
     }
     
     let mlwe_bit = 32 - item_size_bytes.leading_zeros() - 1;
