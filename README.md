@@ -67,6 +67,7 @@ record_size (bytes) = pt_mod * polynomial_degree / 8
 
 | polynomial_degree | pt_mod | Record Size  |
 |-------------------|--------|--------------|
+| 8                 | 16     | 16 bytes     |
 | 16                | 16     | 32 bytes     |
 | 32                | 16     | 64 bytes     |
 | 64                | 16     | 128 bytes    |
