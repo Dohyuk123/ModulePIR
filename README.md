@@ -19,10 +19,7 @@ We have tested the above steps on a fresh AWS `r6i.16xlarge` Ubuntu 22.04 instan
 ## Options
 
 To pass arguments, make sure to run `cargo run --release -- <ARGS>` (the `--` is important).
-
 ```
-Usage: cargo run --release -- [OPTIONS]
-
 Usage: cargo run --release -- [OPTIONS]
 
 Options:
@@ -41,6 +38,7 @@ Options:
 
   -h, --help     Print help
   -V, --version  Print version
+```
 
 ## Database Configuration
 
@@ -49,56 +47,53 @@ The database is configured as a matrix of size `(db_dim_1 * 2048) x (db_dim_2 * 
 ### Database Size Calculation
 
 The database size is calculated as:
-
 ```
 db_size (bytes) = pt_mod * 2048 * 2048 * (2^db_dim_1) * (2^db_dim_2) / 8
 ```
 
-| db_dim_1 | db_dim_2 | Database Size | 
-|----------|----------|---------------------------|
-| 3        | 2        | 256 MB                    | 
-| 4        | 3        | 1 GB                      | 
-| 5        | 5        | 8 GB                      | 
-| 6        | 6        | 32 GB                     | 
+| db_dim_1 | db_dim_2 | Database Size |
+|----------|----------|---------------|
+| 3        | 2        | 256 MB        |
+| 4        | 3        | 1 GB          |
+| 5        | 5        | 8 GB          |
+| 6        | 6        | 32 GB         |
 
 ### Record Size
 
 The record size is determined by the polynomial degree and plaintext modulus:
-
 ```
 record_size (bytes) = pt_mod * polynomial_degree / 8
 ```
 
-| polynomial_degree | pt_mod | Record Size |
-|-------------------------|-----|---------------------------------|
-| 16               | 16 | 32 bytes               |
-| 32               | 16 | 64 bytes               |
-| 64               | 16 | 128 bytes               |
-| 128               | 16 | 256 bytes               |
-| 256               | 16 | 512 bytes               |
-| 512               | 16 | 1024 bytes              |
-| 1024              | 15 | 1920 bytes              |
+| polynomial_degree | pt_mod | Record Size  |
+|-------------------|--------|--------------|
+| 16                | 16     | 32 bytes     |
+| 32                | 16     | 64 bytes     |
+| 64                | 16     | 128 bytes    |
+| 128               | 16     | 256 bytes    |
+| 256               | 16     | 512 bytes    |
+| 512               | 16     | 1024 bytes   |
+| 1024              | 15     | 1920 bytes   |
 
 ### Parameter Constraints
 
 | pt_mod | polynomial_degree range |
 |--------|-------------------------|
-| 15     | 1024               |
+| 15     | 1024                    |
 | 16     | 8 to 512                |
 
 ### Benchmark Configurations
 
-The benchmarks in the paper use `polynomial_degree = 128` and `pt_mod = 15` with the following database dimensions:
+The benchmarks in the paper use `polynomial_degree = 128` with the following database dimensions:
 
-| Database Size | db_dim_1 | db_dim_2 | Command |
-|---------------|----------|----------|---------|
+| Database Size | db_dim_1 | db_dim_2 | Command                            |
+|---------------|----------|----------|------------------------------------|
 | 256 MB        | 3        | 2        | `cargo run --release -- -d 3 -e 2` |
 | 1 GB          | 4        | 3        | `cargo run --release -- -d 4 -e 3` |
 | 8 GB          | 5        | 5        | `cargo run --release -- -d 5 -e 5` |
 | 32 GB         | 6        | 6        | `cargo run --release -- -d 6 -e 6` |
 
 ### Examples
-
 ```bash
 # Default (1 GB database, 256-byte records)
 cargo run --release
