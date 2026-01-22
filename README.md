@@ -42,7 +42,7 @@ Options:
 
 ## Database Configuration
 
-The database is configured as a matrix of size `(db_dim_1 * 2048) x (db_dim_2 * 2048)` with entries in modulus `2^pt_mod`.
+The database is configured as a matrix of size `(2^db_dim_1 * 2048) x (2^db_dim_2 * 2048)` with entries in modulus `2^pt_mod`.
 
 ### Database Size Calculation
 
