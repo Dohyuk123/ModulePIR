@@ -357,7 +357,28 @@ pub fn decrypt_ct_reg_measured<'a>(
 
     let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result.rows, dec_result.cols);
     for z in 0..dec_rescaled.data.len() {
-        dec_rescaled.data[z] = rescale(dec_result.data[z], params.modulus, params.pt_modulus);
+        dec_rescaled.data[z] = rescale(dec_result.data[z], params.modulus, 1<<15);
+    }
+
+    // measure noise width
+    let s_2 = measure_noise_width_squared(params, client, ct, &dec_rescaled, coeffs_to_measure);
+    debug!("log2(measured noise): {}", s_2.log2());
+
+    dec_rescaled
+}
+
+pub fn decrypt_ct_reg_measured_mlwe<'a>(
+    client: &Client<'a>,
+    params: &'a Params,
+    ct: &PolyMatrixNTT<'a>,
+    coeffs_to_measure: usize,
+    plaintext: usize
+) -> PolyMatrixRaw<'a> {
+    let dec_result = client.decrypt_matrix_reg(ct).raw();
+
+    let mut dec_rescaled = PolyMatrixRaw::zero(&params, dec_result.rows, dec_result.cols);
+    for z in 0..dec_rescaled.data.len() {
+        dec_rescaled.data[z] = rescale(dec_result.data[z], params.modulus, 1<<plaintext);
     }
 
     // measure noise width
@@ -440,12 +461,13 @@ impl<'a> YClient<'a> {
 	dim_log2: usize,
 	pt_byte_log2: usize,
 	index: usize, 
+	pt_mod: usize,
     ) -> PolyMatrixNTT<'a> {
 	assert_eq!((1<<(dim_log2 + self.params.poly_len_log2 - pt_byte_log2)) >= index, true);
 
 	let mut rng_pub = ChaCha20Rng::from_seed(get_seed(public_seed_idx)); 
 
-	let scale_k = self.params.modulus / self.params.pt_modulus;
+	let scale_k = self.params.modulus / (1<<15);
 	
 	let mut query_vec = vec![0u64; 1<<(dim_log2 + self.params.poly_len_log2)]; // mlwe
 
@@ -794,7 +816,7 @@ impl<'a> YClient<'a> {
 	let mut decomposed_a = PolyMatrixRaw::zero(&mlwe_params, 2, dimension);
 
 	for i in 0..2{
-	    let decrypt_a_parts = decrypt_ct_reg_measured(&self.inner, &self.params, &double_response_a[i].ntt(), 0);
+	    let decrypt_a_parts = decrypt_ct_reg_measured_mlwe(&self.inner, &self.params, &double_response_a[i].ntt(), 0, 15);
 	    let mut poly_temp = PolyMatrixRaw::zero(&mlwe_params, 1, dimension);
 	    for j in 0..dimension{
 		for k in 0..mlwe_params.poly_len{

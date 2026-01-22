@@ -74,7 +74,7 @@ impl Sample for u16 {
 }
 
 pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize, pt_mod: usize){
-
+    let mut params_double = params_for_scenario(1<<30, 1);
     let mut params = params_for_scenario(1<<30, 1);
     params.pt_modulus = 1<<pt_mod;
     
@@ -121,7 +121,7 @@ pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize
     let y_constants = generate_y_constants(&params);
 	
     let pack_pub_params = raw_generate_expansion_params( // mlwe to rlwe compression key
-        &params,
+        &params_double,
         client.get_sk_reg(),
         params.poly_len_log2 - mlwe_params.poly_len_log2,
         params.t_exp_left,
@@ -167,7 +167,7 @@ pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize
 
     for i in 0..db_rows{
 	for j in 0..db_cols{
-	    let value: u16 = rng.gen_range((params.pt_modulus - 400) as u16..(params.pt_modulus - 1) as u16); // 0 ~ 65535 중 임의의 값
+	    let value: u16 = rng.gen_range(0 as u16..((1<<pt_mod) - 1) as u16); // 0 ~ 65535 중 임의의 값
             matrix.push(value);
 	}
     }	
@@ -254,7 +254,8 @@ pub fn run_module_pir_on_params (mlwe_bit: u32, db_dim_1: usize, db_dim_2: usize
 	    dimension, 
 	    params.db_dim_2,  
 	    mlwe_params.poly_len_log2, 
-	    target_col
+	    target_col, 
+	    pt_mod
 	); 
 
         let query_process_end = Instant::now();

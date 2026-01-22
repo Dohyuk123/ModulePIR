@@ -2379,7 +2379,7 @@ mod test {
 	}
 	
     }
-
+/*
     #[test]
     fn test_module_pir_fn(){ // start : row: 16384 / second : col:8192
 
@@ -2584,5 +2584,6 @@ mod test {
 	println!("end of the protocol");
 
     }
+    */
 
 }

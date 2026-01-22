@@ -23,11 +23,13 @@ To pass arguments, make sure to run `cargo run --release -- <ARGS>` (the `--` is
 ```
 Usage: cargo run --release -- [OPTIONS]
 
+Usage: cargo run --release -- [OPTIONS]
+
 Options:
   -p, --polynomial-degree <POLYNOMIAL_DEGREE>
           Polynomial degree (default: 128)
           Must be a power of 2
-          Range: 8 to 1024 (when pt_mod=15), 8 to 512 (when pt_mod=16)
+          Range: 8 to 1024
 
   -d, --db-dim-1 <DB_DIM_1>
           Database dimension 1 (default: 4)
@@ -37,13 +39,8 @@ Options:
           Database dimension 2 (default: 3)
           Must be <= 7
 
-  -t, --pt-mod <PT_MOD>
-          Plaintext modulus (default: 15)
-          Must be 15 or 16
-
   -h, --help     Print help
   -V, --version  Print version
-```
 
 ## Database Configuration
 
@@ -57,12 +54,12 @@ The database size is calculated as:
 db_size (bytes) = pt_mod * 2048 * 2048 * (2^db_dim_1) * (2^db_dim_2) / 8
 ```
 
-| db_dim_1 | db_dim_2 | Database Size (pt_mod=15) | Database Size (pt_mod=16) |
-|----------|----------|---------------------------|---------------------------|
-| 3        | 2        | 256 MB                    | 273 MB                    |
-| 4        | 3        | 1 GB                      | 1.07 GB                   |
-| 5        | 5        | 8 GB                      | 8.5 GB                    |
-| 6        | 6        | 32 GB                     | 34 GB                     |
+| db_dim_1 | db_dim_2 | Database Size | 
+|----------|----------|---------------------------|
+| 3        | 2        | 256 MB                    | 
+| 4        | 3        | 1 GB                      | 
+| 5        | 5        | 8 GB                      | 
+| 6        | 6        | 32 GB                     | 
 
 ### Record Size
 
@@ -72,18 +69,21 @@ The record size is determined by the polynomial degree and plaintext modulus:
 record_size (bytes) = pt_mod * polynomial_degree / 8
 ```
 
-| polynomial_degree | Record Size (pt_mod=15) | Record Size (pt_mod=16) |
-|-------------------|-------------------------|-------------------------|
-| 128               | 240 bytes               | 256 bytes               |
-| 256               | 480 bytes               | 512 bytes               |
-| 512               | 960 bytes               | 1024 bytes              |
-| 1024              | 1920 bytes              | N/A (not supported)     |
+| polynomial_degree | pt_mod | Record Size |
+|-------------------------|-----|---------------------------------|
+| 16               | 16 | 32 bytes               |
+| 32               | 16 | 64 bytes               |
+| 64               | 16 | 128 bytes               |
+| 128               | 16 | 256 bytes               |
+| 256               | 16 | 512 bytes               |
+| 512               | 16 | 1024 bytes              |
+| 1024              | 15 | 1920 bytes              |
 
 ### Parameter Constraints
 
 | pt_mod | polynomial_degree range |
 |--------|-------------------------|
-| 15     | 8 to 1024               |
+| 15     | 1024               |
 | 16     | 8 to 512                |
 
 ### Benchmark Configurations
@@ -100,7 +100,7 @@ The benchmarks in the paper use `polynomial_degree = 128` and `pt_mod = 15` with
 ### Examples
 
 ```bash
-# Default (1 GB database, 240-byte records, pt_mod=15)
+# Default (1 GB database, 256-byte records)
 cargo run --release
 
 # 8 GB database
@@ -109,15 +109,15 @@ cargo run --release -- -d 5 -e 5
 # 32 GB database
 cargo run --release -- -d 6 -e 6
 
-# Custom polynomial degree (480-byte records)
-cargo run --release -- -p 256 -d 4 -e 3
+# 512-byte records
+cargo run --release -- -p 256
 
-# Using pt_mod=16 (256-byte records)
-cargo run --release -- -t 16
+# 1024-byte records
+cargo run --release -- -p 512
 
-# pt_mod=16 with 512-byte records
-cargo run --release -- -p 256 -t 16 -d 4 -e 3
+# 1920-byte records (uses pt_mod=15)
+cargo run --release -- -p 1024
 
-# pt_mod=16 with maximum polynomial degree (1024-byte records)
-cargo run --release -- -p 512 -t 16 -d 4 -e 3
+# 8 GB database with 512-byte records
+cargo run --release -- -p 256 -d 5 -e 5
 ```
