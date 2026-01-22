@@ -11,7 +11,7 @@ To build and run this code:
 3. **Install Rust using rustup** using `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`.
    - Select `1) Proceed with installation (default)` when prompted
    - After installation, configure the current shell as instructed by running `source "$HOME/.cargo/env"`
-4. Run `git clone https://github.com/[REPO-URL]/modulepir.git` and `cd modulepir`.
+4. Run `git clone https://github.com/Dohyuk123/ModulePIR.git` and `cd modulepir`.
 5. Run `cargo run --release` to run ModulePIR with default parameters. The first time you run this command, Cargo will download and install the necessary libraries to build the code (~2 minutes); later calls will not take as long. Stability warnings can be safely ignored.
 
 We have tested the above steps on a fresh AWS `r6i.16xlarge` Ubuntu 22.04 instance and confirmed they work.
